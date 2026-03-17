@@ -71,13 +71,22 @@ def _credentials_from_env() -> dict | None:
     """
     project_id = _get("GOOGLE_PROJECT_ID", "").strip()
     private_key_id = _get("GOOGLE_PRIVATE_KEY_ID", "").strip()
-    private_key = _get("GOOGLE_PRIVATE_KEY", "").strip()
     client_email = _get("GOOGLE_CLIENT_EMAIL", "").strip()
+    # Prefer GOOGLE_PRIVATE_KEY_BASE64 (avoids newline/escaping issues on Render, etc.)
+    private_key_b64 = _get("GOOGLE_PRIVATE_KEY_BASE64", "").strip()
+    if private_key_b64:
+        import base64
+        try:
+            private_key = base64.b64decode(private_key_b64).decode("utf-8")
+        except Exception:
+            return None
+    else:
+        private_key = _get("GOOGLE_PRIVATE_KEY", "").strip()
+        # private_key may use literal \n in env; ensure newlines for PEM
+        if "\\n" in private_key:
+            private_key = private_key.replace("\\n", "\n")
     if not all([project_id, private_key_id, private_key, client_email]):
         return None
-    # private_key may use literal \n in env; ensure newlines for PEM
-    if "\\n" in private_key:
-        private_key = private_key.replace("\\n", "\n")
     info: dict = {
         "type": "service_account",
         "project_id": project_id,

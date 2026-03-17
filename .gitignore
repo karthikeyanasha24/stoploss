@@ -3,3 +3,12 @@ data/settings.json
 data/uploaded_credentials.json
 credentials.json
 .env
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Node
+frontend/node_modules/
