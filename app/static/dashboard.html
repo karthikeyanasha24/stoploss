@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Version B — Stop-Loss Analysis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --surface: #18181c;
+      --border: #2a2a2e;
+      --text: #e4e4e7;
+      --text-muted: #a1a1aa;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --success: #22c55e;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .layout {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+    header {
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-top: 0.35rem;
+    }
+    nav {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.15s, background 0.15s;
+    }
+    nav a:hover {
+      color: var(--text);
+      background: var(--surface);
+    }
+    nav a.active {
+      color: var(--accent);
+      background: rgba(99, 102, 241, 0.12);
+    }
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .section h2 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 1rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group:last-child { margin-bottom: 0; }
+    label {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin-bottom: 0.4rem;
+      color: var(--text);
+    }
+    input, select {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+    input::placeholder { color: var(--text-muted); opacity: 0.7; }
+    .row { display: flex; gap: 1rem; }
+    .row .form-group { flex: 1; }
+    .checkbox-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.6rem 0;
+    }
+    .checkbox-wrap input[type="checkbox"] {
+      width: auto;
+      accent-color: var(--accent);
+    }
+    .file-hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+    }
+    button[type="submit"] {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.7rem 1.5rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button[type="submit"]:hover {
+      background: var(--accent-hover);
+    }
+    .msg {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      display: none;
+    }
+    .msg.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.12);
+      color: var(--success);
+    }
+    .msg.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.12);
+      color: var(--error);
+    }
+    .live-section {
+      margin-top: 2rem;
+    }
+    .live-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }
+    .live-card {
+      display: block;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .live-card:hover {
+      border-color: var(--accent);
+      background: rgba(99, 102, 241, 0.06);
+    }
+    .live-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+    .live-card p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .live-card .arrow {
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      color: var(--accent);
+    }
+    #live-content {
+      margin-top: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      max-height: 400px;
+      overflow: auto;
+    }
+    #live-content pre {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <header>
+      <h1>Version B — Stop-Loss Analysis</h1>
+      <p class="sub">Configure settings below. Saved values override .env. Restart the app for config changes.</p>
+    </header>
+
+    <nav>
+      <a href="#" class="active" data-tab="settings">Settings</a>
+      <a href="#" data-tab="live">Live Data</a>
+    </nav>
+
+    <div id="settings-panel">
+      <form id="form">
+        <div class="section">
+          <h2>API (Market Data)</h2>
+          <div class="form-group">
+            <label>Provider</label>
+            <select name="API_PROVIDER">
+              <option value="massive">Massive</option>
+              <option value="finnhub">Finnhub</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" name="API_KEY" placeholder="Your API key">
+          </div>
+          <div class="checkbox-wrap">
+            <input type="checkbox" name="MOCK_API" id="mock" value="1">
+            <label for="mock" style="margin:0">Use mock API (no real HTTP)</label>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Google Sheets</h2>
+          <div class="form-group">
+            <label>Spreadsheet ID</label>
+            <input type="text" name="SPREADSHEET_ID" placeholder="From sheet URL">
+          </div>
+          <div class="form-group">
+            <label>Credentials JSON — upload</label>
+            <input type="file" id="credentials_file" accept=".json">
+            <p class="file-hint">Upload credentials.json. Stored securely.</p>
+          </div>
+          <div class="form-group">
+            <label>Or path to credentials file</label>
+            <input type="text" name="GOOGLE_CREDENTIALS_PATH" placeholder="credentials.json or path">
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Market & Scheduler</h2>
+          <div class="form-group">
+            <label>Timezone</label>
+            <input type="text" name="MARKET_TIMEZONE" placeholder="US/Eastern">
+          </div>
+          <div class="row">
+            <div class="form-group">
+              <label>Market Open</label>
+              <input type="text" name="MARKET_OPEN" placeholder="09:30">
+            </div>
+            <div class="form-group">
+              <label>Market Close</label>
+              <input type="text" name="MARKET_CLOSE" placeholder="16:00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Tracking interval (seconds)</label>
+            <input type="number" name="POLLING_INTERVAL" min="60" placeholder="300">
+          </div>
+          <div class="form-group">
+            <label>Analysis after (days)</label>
+            <input type="number" name="ANALYSIS_DAYS" min="1" placeholder="7">
+          </div>
+        </div>
+
+        <button type="submit">Save settings</button>
+        <div id="msg" class="msg"></div>
+      </form>
+    </div>
+
+    <div id="live-panel" class="hidden">
+      <div class="section">
+        <h2>Live Data</h2>
+        <p class="sub" style="margin-bottom:1rem">Real-time trades, analysis, and stats. Refreshes when you click a link.</p>
+        <div class="live-grid">
+          <a href="/trades" target="_blank" class="live-card">
+            <h3>Trades</h3>
+            <p>All synced trades from sheet</p>
+            <span class="arrow">View →</span>
+          </a>
+          <a href="/analysis" target="_blank" class="live-card">
+            <h3>Analysis</h3>
+            <p>Stop % evaluation (7+ days)</p>
+            <span class="arrow">View →</span>
+          </a>
+        </div>
+        <div class="form-group" style="margin-top:1rem">
+          <label>Trade stats (by ID)</label>
+          <div class="row" style="align-items:flex-end">
+            <div class="form-group" style="flex:0 0 100px">
+              <input type="number" id="stats-id" placeholder="ID" min="1" style="width:100%">
+            </div>
+            <button type="button" id="view-stats" style="padding:0.6rem 1rem">View stats</button>
+          </div>
+        </div>
+        <div id="live-content" class="hidden">
+          <pre id="live-json"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('form');
+    const msg = document.getElementById('msg');
+    const credsInput = document.getElementById('credentials_file');
+    const settingsPanel = document.getElementById('settings-panel');
+    const livePanel = document.getElementById('live-panel');
+    const liveContent = document.getElementById('live-content');
+    const liveJson = document.getElementById('live-json');
+
+    document.querySelectorAll('nav a').forEach(a => {
+      a.onclick = (e) => {
+        e.preventDefault();
+        document.querySelectorAll('nav a').forEach(x => x.classList.remove('active'));
+        a.classList.add('active');
+        const tab = a.dataset.tab;
+        settingsPanel.classList.toggle('hidden', tab !== 'settings');
+        livePanel.classList.toggle('hidden', tab !== 'live');
+      };
+    });
+
+    document.getElementById('view-stats').onclick = async () => {
+      const id = document.getElementById('stats-id').value;
+      if (!id) return;
+      try {
+        const r = await fetch('/stats/' + id);
+        const data = await r.json();
+        liveJson.textContent = JSON.stringify(data, null, 2);
+        liveContent.classList.remove('hidden');
+      } catch (e) {
+        liveJson.textContent = 'Error: ' + e.message;
+        liveContent.classList.remove('hidden');
+      }
+    };
+
+    async function load() {
+      const r = await fetch('/api/settings');
+      if (!r.ok) return;
+      const data = await r.json();
+      for (const [k, v] of Object.entries(data)) {
+        const el = form.elements[k];
+        if (!el) continue;
+        if (el.type === 'checkbox') el.checked = !!v;
+        else if (v != null) el.value = v;
+      }
+    }
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      msg.className = 'msg';
+      msg.textContent = '';
+      const body = {};
+      for (const el of form.elements) {
+        if (!el.name || el.name === '') continue;
+        if (el.type === 'file') continue;
+        if (el.type === 'checkbox') body[el.name] = el.checked;
+        else body[el.name] = el.value;
+      }
+      try {
+        const r = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || data.message || 'Save failed');
+        if (credsInput.files.length) {
+          const fd = new FormData();
+          fd.append('file', credsInput.files[0]);
+          const r2 = await fetch('/api/settings/credentials', { method: 'POST', body: fd });
+          if (!r2.ok) {
+            const d = await r2.json();
+            throw new Error(d.detail || 'Credentials upload failed');
+          }
+        }
+        msg.className = 'msg success';
+        msg.textContent = 'Saved. Restart the app for changes to take effect.';
+      } catch (err) {
+        msg.className = 'msg error';
+        msg.textContent = err.message;
+      }
+    };
+
+    load();
+  </script>
+</body>
+</html>

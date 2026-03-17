@@ -1,0 +1,5 @@
+# Stored settings (may contain API keys)
+data/settings.json
+data/uploaded_credentials.json
+credentials.json
+.env

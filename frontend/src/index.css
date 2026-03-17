@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+@theme {
+  /* Base - dark default */
+  --color-background: #0c0c0e;
+  --color-foreground: #f4f4f5;
+  --color-card: #161618;
+  --color-card-foreground: #f4f4f5;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  --color-border: #27272a;
+  --color-accent: #6366f1;
+  --color-accent-foreground: #fafafa;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+}
+
+.dark {
+  --color-background: #0c0c0e;
+  --color-foreground: #f4f4f5;
+  --color-card: #161618;
+  --color-card-foreground: #f4f4f5;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  --color-border: #27272a;
+  --color-accent: #6366f1;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+}
+
+.light {
+  --color-background: #fafafa;
+  --color-foreground: #18181b;
+  --color-card: #ffffff;
+  --color-card-foreground: #18181b;
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #71717a;
+  --color-border: #e4e4e7;
+  --color-accent: #4f46e5;
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+}
+
+/* Smooth transitions for theme switches */
+html {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+body {
+  @apply antialiased;
+}
