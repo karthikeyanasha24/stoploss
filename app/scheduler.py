@@ -61,7 +61,7 @@ def create_scheduler(api: MarketDataAPI) -> BackgroundScheduler:
     )
     scheduler.add_job(
         job_sheet_sync,
-        IntervalTrigger(seconds=600),
+        IntervalTrigger(seconds=300),  # 5 minutes - auto-update latest trades from sheet
         id="sheet_sync",
         name="Sync sheet to DB",
         max_instances=1,

@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { fetchTrades, fetchAnalysis } from "../lib/api";
+import { fetchTrades, fetchAnalysis, syncSheetToDb } from "../lib/api";
 import type { Trade } from "../lib/api";
 
 type SortKey =
@@ -52,34 +52,46 @@ export default function Dashboard() {
   const [filterPreset, setFilterPreset] = useState<"all" | "today" | "last2" | "last3" | "last7" | "range">("all");
   const [rangeFrom, setRangeFrom] = useState<string>("");
   const [rangeTo, setRangeTo] = useState<string>("");
+  const [syncing, setSyncing] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [tradesData, analysisData] = await Promise.all([fetchTrades(), fetchAnalysis()]);
+      setTrades(tradesData);
+      setTradesReady(analysisData.total_trades_analyzed ?? 0);
+      setLastUpdate(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load trades");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [tradesData, analysisData] = await Promise.all([fetchTrades(), fetchAnalysis()]);
-        if (cancelled) return;
-        setTrades(tradesData);
-        setTradesReady(analysisData.total_trades_analyzed ?? 0);
-        setLastUpdate(new Date());
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load trades");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
     load();
-    const onSettingsSaved = () => {
-      if (!cancelled) load();
-    };
+    const onSettingsSaved = () => load();
     window.addEventListener("settings-saved", onSettingsSaved);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("settings-saved", onSettingsSaved);
-    };
-  }, []);
+    return () => window.removeEventListener("settings-saved", onSettingsSaved);
+  }, [load]);
+
+  async function handleSyncFromSheet() {
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await syncSheetToDb();
+      if (res.ok) {
+        await load();
+      } else {
+        setError(res.error ?? "Sync failed");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const filteredTrades = useMemo(() => {
     if (filterPreset === "all") return trades;
@@ -170,12 +182,40 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Monitor tracked trades and performance
-        </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Monitor tracked trades and performance
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleSyncFromSheet}
+          disabled={syncing || loading}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50 disabled:opacity-50"
+        >
+          {syncing ? (
+            "Syncing…"
+          ) : (
+            <>
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Sync from Sheet
+            </>
+          )}
+        </button>
       </div>
+      {trades.length === 0 && !loading && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+          <p className="font-medium text-amber-700 dark:text-amber-400">No trades yet</p>
+          <p className="mt-1 text-muted-foreground">
+            Click &quot;Sync from Sheet&quot; above to load trades from your Google Sheet. Or check{" "}
+            <Link to="/sheet-reference" className="text-accent hover:underline">Sheet Reference</Link> to verify the sheet connection.
+          </p>
+        </div>
+      )}
 
       {/* Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
