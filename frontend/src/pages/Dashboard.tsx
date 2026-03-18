@@ -271,6 +271,23 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:items-end">
+            <button
+              type="button"
+              onClick={handleSyncFromSheet}
+              disabled={syncing || loading}
+              className="inline-flex items-center gap-2 rounded-lg border border-accent/50 bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent/20 disabled:opacity-50"
+            >
+              {syncing ? (
+                "Syncing…"
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Sync from Sheet
+                </>
+              )}
+            </button>
             <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs sm:text-sm">
               <button
                 type="button"
