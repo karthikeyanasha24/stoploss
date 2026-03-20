@@ -73,8 +73,8 @@ export default function TradeDetails() {
   const stats = data?.stats;
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center gap-4">
+    <div className="space-y-6 sm:space-y-8">
+      <div className="flex items-start gap-3 sm:items-center sm:gap-4">
         <Link
           to="/"
           className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -84,28 +84,28 @@ export default function TradeDetails() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold text-foreground">Trade Details</h1>
           <p className="text-sm text-muted-foreground">Price movement and stats</p>
         </div>
       </div>
 
       {/* Trade Summary */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-border">
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="border-b border-border px-4 py-4 sm:px-6">
           <h2 className="text-lg font-semibold text-foreground">Trade Summary</h2>
         </div>
         {loading ? (
-          <div className="p-6">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          <div className="p-4 sm:p-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {Array.from({ length: 6 }).map((_, i) => (
                 <SkeletonCard key={i} />
               ))}
             </div>
           </div>
         ) : data || trade ? (
-          <div className="p-6">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
+          <div className="p-4 sm:p-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Ticker</p>
                 <p className="mt-1 text-lg font-semibold text-foreground">{data?.ticker ?? trade?.ticker ?? "—"}</p>
@@ -146,14 +146,14 @@ export default function TradeDetails() {
       </div>
 
       {/* Stats Panel */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-border">
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="border-b border-border px-4 py-4 sm:px-6">
           <h2 className="text-lg font-semibold text-foreground">Price Movement Stats</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             Lowest, highest, and max drawdown since entry
           </p>
         </div>
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           {loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <SkeletonCard />

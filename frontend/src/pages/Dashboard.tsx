@@ -19,6 +19,14 @@ type SortDir = "asc" | "desc";
 
 const PAGE_SIZE = 10;
 
+function formatCurrency(value: number | null | undefined) {
+  return value != null ? `$${value.toFixed(2)}` : "—";
+}
+
+function formatEntryDate(value: string | undefined) {
+  return value ? new Date(value).toLocaleDateString() : "—";
+}
+
 function SkeletonCard() {
   return (
     <div className="rounded-xl border border-border bg-card p-6 animate-pulse">
@@ -37,6 +45,85 @@ function SkeletonRow() {
         </td>
       ))}
     </tr>
+  );
+}
+
+function MobileTradeCard({ trade }: { trade: Trade }) {
+  const hasDrawdownData = trade.drawdown_price != null;
+
+  return (
+    <div
+      className={`rounded-xl border bg-card p-4 shadow-sm ${
+        hasDrawdownData
+          ? "border-border"
+          : "border-amber-500/30 bg-amber-500/5 dark:bg-amber-900/10"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {formatEntryDate(trade.entry_time)}
+          </p>
+          <Link
+            to={`/trade/${trade.id}`}
+            className="mt-1 inline-flex text-lg font-semibold text-accent hover:underline"
+          >
+            {trade.ticker}
+          </Link>
+        </div>
+        <span
+          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+            trade.option_type === "CALL"
+              ? "bg-success/15 text-success"
+              : "bg-danger/15 text-danger"
+          }`}
+        >
+          {trade.option_type}
+        </span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Strike</p>
+          <p className="mt-1 font-medium text-foreground">{trade.strike_price}</p>
+        </div>
+        <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Expiry</p>
+          <p className="mt-1 font-medium text-foreground">{trade.expiry_date}</p>
+        </div>
+        <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Entry</p>
+          <p className="mt-1 font-medium text-foreground">{formatCurrency(trade.entry_price)}</p>
+        </div>
+        <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Current</p>
+          <p className="mt-1 font-medium text-foreground">
+            {trade.current_price_source === "last" && trade.current_price != null
+              ? `Last: ${trade.current_price.toFixed(2)}`
+              : formatCurrency(trade.current_price)}
+          </p>
+        </div>
+        <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Drawdown</p>
+          <p className="mt-1 font-medium text-danger">
+            {hasDrawdownData ? formatCurrency(trade.drawdown_price) : "No data"}
+          </p>
+        </div>
+        <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Drawdown %</p>
+          <p className="mt-1 font-medium text-danger">
+            {trade.max_drawdown_percent != null ? `${trade.max_drawdown_percent.toFixed(1)}%` : "No data"}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-sm">
+        <p className="min-w-0 text-muted-foreground">
+          Analyst: <span className="font-medium text-foreground">{trade.analyst_name || "—"}</span>
+        </p>
+        <span className="capitalize text-muted-foreground">{trade.status || "—"}</span>
+      </div>
+    </div>
   );
 }
 
@@ -178,6 +265,10 @@ export default function Dashboard() {
   const totalPages = Math.ceil(sortedTrades.length / PAGE_SIZE) || 1;
   const paginatedTrades = sortedTrades.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  useEffect(() => {
+    setPage((current) => Math.min(current, Math.max(totalPages - 1, 0)));
+  }, [totalPages]);
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -189,7 +280,7 @@ export default function Dashboard() {
   const tradesTracked = trades.filter((t) => t.status?.toLowerCase() === "tracking" || t.status === "active").length || trades.length;
 
   return (
-    <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
@@ -226,7 +317,7 @@ export default function Dashboard() {
       )}
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {loading ? (
           <>
             <SkeletonCard />
@@ -236,19 +327,19 @@ export default function Dashboard() {
           </>
         ) : (
           <>
-            <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-colors">
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors sm:p-6">
               <p className="text-sm font-medium text-muted-foreground">Total Active Trades</p>
               <p className="mt-2 text-2xl font-semibold text-foreground">{trades.length}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-colors">
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors sm:p-6">
               <p className="text-sm font-medium text-muted-foreground">Trades Being Tracked</p>
               <p className="mt-2 text-2xl font-semibold text-foreground">{tradesTracked}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-colors">
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors sm:p-6">
               <p className="text-sm font-medium text-muted-foreground">Trades Ready for Analysis</p>
               <p className="mt-2 text-2xl font-semibold text-foreground">{tradesReady}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-colors">
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors sm:p-6">
               <p className="text-sm font-medium text-muted-foreground">Last Update</p>
               <p className="mt-2 text-lg font-medium text-foreground">
                 {lastUpdate ? lastUpdate.toLocaleTimeString() : "—"}
@@ -260,7 +351,7 @@ export default function Dashboard() {
       </div>
 
       {/* Active Trades Table */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="px-4 sm:px-6 py-4 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Active Trades</h2>
@@ -284,7 +375,7 @@ export default function Dashboard() {
               type="button"
               onClick={handleSyncFromSheet}
               disabled={syncing || loading}
-              className="inline-flex items-center gap-2 rounded-lg border border-accent/50 bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent/20 disabled:opacity-50"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/20 disabled:opacity-50 sm:w-auto sm:py-1.5"
             >
               {syncing ? (
                 "Syncing…"
@@ -370,7 +461,7 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+            <div className="grid grid-cols-1 gap-2 text-xs sm:flex sm:flex-wrap sm:items-center sm:text-sm">
               <span className="text-muted-foreground">Custom range:</span>
               <input
                 type="date"
@@ -380,7 +471,7 @@ export default function Dashboard() {
                   setFilterPreset("range");
                   setPage(0);
                 }}
-                className="rounded-md border border-border bg-background px-2 py-1 text-xs sm:text-sm"
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs sm:w-auto sm:text-sm"
               />
               <span className="text-muted-foreground">to</span>
               <input
@@ -391,7 +482,7 @@ export default function Dashboard() {
                   setFilterPreset("range");
                   setPage(0);
                 }}
-                className="rounded-md border border-border bg-background px-2 py-1 text-xs sm:text-sm"
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs sm:w-auto sm:text-sm"
               />
               {(rangeFrom || rangeTo) && (
                 <button
@@ -417,7 +508,22 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="overflow-x-auto">
+        <div className="space-y-4 p-4 sm:hidden">
+          {loading
+            ? Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border bg-card p-4">
+                  <div className="h-5 w-24 animate-pulse rounded bg-muted" />
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    {Array.from({ length: 6 }).map((__, idx) => (
+                      <div key={idx} className="h-16 animate-pulse rounded-lg bg-muted/70" />
+                    ))}
+                  </div>
+                </div>
+              ))
+            : paginatedTrades.map((trade) => <MobileTradeCard key={trade.id} trade={trade} />)}
+        </div>
+
+        <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[700px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
@@ -467,7 +573,7 @@ export default function Dashboard() {
                       }`}
                     >
                       <td className="px-4 py-3 text-muted-foreground">
-                        {t.entry_time ? new Date(t.entry_time).toLocaleDateString() : "—"}
+                        {formatEntryDate(t.entry_time)}
                       </td>
                       <td className="px-4 py-3 font-medium">
                         <Link
@@ -490,13 +596,13 @@ export default function Dashboard() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.expiry_date}</td>
-                      <td className="px-4 py-3 text-foreground">${t.entry_price.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-foreground">{formatCurrency(t.entry_price)}</td>
                       <td className="px-4 py-3" title={t.current_price_source === "last" ? "Last price (not live) — compare with your broker" : "Live price — compare with your broker"}>
                         {t.current_price != null ? (
                           t.current_price_source === "live" ? (
-                            <span className="font-medium text-foreground">${t.current_price.toFixed(2)}</span>
+                            <span className="font-medium text-foreground">{formatCurrency(t.current_price)}</span>
                           ) : (
-                            <span className="font-medium text-muted-foreground">Last: ${t.current_price.toFixed(2)}</span>
+                            <span className="font-medium text-muted-foreground">Last: {formatCurrency(t.current_price)}</span>
                           )
                         ) : (
                           <span className="text-amber-600 dark:text-amber-400 text-xs font-medium">—</span>
@@ -505,7 +611,7 @@ export default function Dashboard() {
                       <td className="px-4 py-3">
                         {hasDrawdownData ? (
                           <span className="font-medium text-danger">
-                            ${dd!.toFixed(2)}
+                            {formatCurrency(dd)}
                           </span>
                         ) : (
                           <span className="text-amber-600 dark:text-amber-400 text-xs font-medium" title="No price data yet — tracker may have API issues or market closed">
@@ -538,11 +644,11 @@ export default function Dashboard() {
         </div>
 
         {!loading && totalPages > 1 && (
-          <div className="flex items-center justify-between px-6 py-3 border-t border-border">
+          <div className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <p className="text-sm text-muted-foreground">
               Page {page + 1} of {totalPages}
             </p>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex">
               <button
                 type="button"
                 onClick={() => setPage((p) => Math.max(0, p - 1))}

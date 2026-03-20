@@ -47,7 +47,7 @@ export default function Analysis() {
     : 100;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Stop-Loss Analysis</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -62,8 +62,8 @@ export default function Analysis() {
       )}
 
       {/* Recommended Stop Hero */}
-      <div className="rounded-xl border border-accent/40 bg-card shadow-lg overflow-hidden bg-gradient-to-br from-accent/5 to-transparent">
-        <div className="p-8 md:p-10">
+      <div className="overflow-hidden rounded-xl border border-accent/40 bg-card shadow-lg bg-gradient-to-br from-accent/5 to-transparent">
+        <div className="p-5 sm:p-8 md:p-10">
           {loading ? (
             <SkeletonCard />
           ) : data?.recommended_stop != null ? (
@@ -71,7 +71,7 @@ export default function Analysis() {
               <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 Recommended Stop
               </p>
-              <p className="mt-3 text-4xl md:text-5xl font-bold text-accent">
+              <p className="mt-3 text-3xl font-bold text-accent sm:text-4xl md:text-5xl">
                 {data.recommended_stop}%
               </p>
               {data.summary && (
@@ -98,13 +98,67 @@ export default function Analysis() {
 
       {/* Stop Performance Table */}
       <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-border">
+        <div className="border-b border-border px-4 py-4 sm:px-6">
           <h2 className="text-lg font-semibold text-foreground">Stop Performance</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             Hit rate and survival rate by stop level
           </p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="sm:hidden">
+          {loading ? (
+            <div className="space-y-4 p-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-28 animate-pulse rounded-xl bg-muted" />
+              ))}
+            </div>
+          ) : data?.stop_results?.length ? (
+            <div className="space-y-3 p-4">
+              {data.stop_results.map((r) => {
+                const survived = 100 - r.trades_stopped_out_pct;
+                return (
+                  <div key={r.stop_percent} className="rounded-xl border border-border bg-background/40 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-base font-semibold text-foreground">{r.stop_percent}% stop</h3>
+                      <span className="text-sm text-muted-foreground">
+                        {r.trades_stopped} / {r.total_trades} trades
+                      </span>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Hit rate</span>
+                          <span className="font-medium text-danger">{r.trades_stopped_out_pct.toFixed(1)}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-danger/80"
+                            style={{ width: `${r.trades_stopped_out_pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Survived</span>
+                          <span className="font-medium text-success">{survived.toFixed(1)}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-success/80"
+                            style={{ width: `${survived}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-4 text-muted-foreground">No stop results available.</div>
+          )}
+        </div>
+
+        <div className="hidden overflow-x-auto sm:block">
           {loading ? (
             <div className="p-6 space-y-4">
               {Array.from({ length: 6 }).map((_, i) => (

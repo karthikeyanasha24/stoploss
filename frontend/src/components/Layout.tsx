@@ -85,7 +85,7 @@ export default function Layout() {
         />
       )}
 
-      <div className="flex">
+      <div className="flex min-h-[calc(100vh-57px)] lg:min-h-screen">
         {/* ── Sidebar ── */}
         {/*
           Mobile: fixed drawer, slides in from left (z-50 above overlay)
@@ -94,7 +94,7 @@ export default function Layout() {
         <aside
           className={[
             // Shared
-            "w-64 border-r border-border bg-card flex flex-col",
+            "w-[85vw] max-w-72 border-r border-border bg-card flex flex-col",
             // Mobile: fixed full-height drawer
             "fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-in-out",
             sidebarOpen ? "translate-x-0" : "-translate-x-full",
@@ -171,7 +171,7 @@ export default function Layout() {
 
         {/* ── Main content ── */}
         <main className="flex-1 min-w-0">
-          <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+          <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
             <Outlet />
           </div>
         </main>

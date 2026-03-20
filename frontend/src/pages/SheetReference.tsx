@@ -60,7 +60,7 @@ export default function SheetReference() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Sheet Reference</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -95,8 +95,8 @@ export default function SheetReference() {
 
       <div className="space-y-6">
         {data.sheets.map((sheet) => (
-          <div key={sheet.name} className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-border bg-muted/30">
+          <div key={sheet.name} className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="border-b border-border bg-muted/30 px-4 py-4 sm:px-6">
               <h2 className="text-lg font-semibold text-foreground">{sheet.name}</h2>
               {sheet.skip_reason && (
                 <p className="text-sm text-muted-foreground mt-1">{sheet.skip_reason}</p>
@@ -114,7 +114,39 @@ export default function SheetReference() {
               )}
             </div>
             {sheet.trades.length > 0 && (
-              <div className="overflow-x-auto">
+              <>
+              <div className="space-y-3 p-4 sm:hidden">
+                {sheet.trades.map((t, i) => (
+                  <div key={i} className="rounded-xl border border-border bg-background/40 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground break-words">{t.ticker_raw}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Entry: {t.entry_price != null ? `$${t.entry_price.toFixed(2)}` : "—"}
+                        </p>
+                      </div>
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                          STATUS_BADGES[t.status]
+                        }`}
+                      >
+                        {t.status}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-3 text-sm">
+                      <div className="rounded-lg bg-muted/30 p-3">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Expiry</p>
+                        <p className="mt-1 text-foreground">{t.expiry_date ?? "—"}</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/30 p-3">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Reason</p>
+                        <p className="mt-1 text-muted-foreground">{t.reason}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[700px]">
                   <thead>
                     <tr className="border-b border-border bg-muted/20">
@@ -167,6 +199,7 @@ export default function SheetReference() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
         ))}

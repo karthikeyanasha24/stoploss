@@ -40,7 +40,7 @@ export default function Logs() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Logs</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -51,7 +51,7 @@ export default function Logs() {
           type="button"
           onClick={load}
           disabled={loading}
-          className="rounded-lg px-4 py-2 text-sm font-medium bg-muted text-foreground hover:bg-muted/80 disabled:opacity-50 transition-colors"
+          className="w-full rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/80 disabled:opacity-50 sm:w-auto"
         >
           Refresh
         </button>
@@ -66,7 +66,7 @@ export default function Logs() {
       <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         <pre
           ref={preRef}
-          className="block p-4 h-[60vh] overflow-auto text-sm text-muted-foreground font-mono whitespace-pre-wrap break-words"
+          className="block h-[60vh] overflow-auto p-4 text-xs font-mono text-muted-foreground whitespace-pre-wrap break-words sm:text-sm"
         >
           {loading && logs.length === 0 ? (
             <span className="text-muted-foreground">Loading logs…</span>
