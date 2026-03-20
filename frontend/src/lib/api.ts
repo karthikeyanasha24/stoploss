@@ -101,48 +101,7 @@ export async function fetchSheetReference(): Promise<SheetReference> {
   return r.json();
 }
 
-export type Settings = {
-  API_PROVIDER: string;
-  API_KEY: string;
-  SPREADSHEET_ID: string;
-  GOOGLE_CREDENTIALS_PATH: string;
-  POLLING_INTERVAL: number;
-  MARKET_TIMEZONE: string;
-  MARKET_OPEN: string;
-  MARKET_CLOSE: string;
-  ANALYSIS_DAYS: number;
-  MOCK_API: boolean;
-  PAPER_TRADING?: boolean;
-};
-
-export async function fetchSettings(): Promise<Settings> {
-  const r = await fetch(`${API_BASE}/settings`);
-  if (!r.ok) throw new Error("Failed to fetch settings");
-  return r.json();
-}
-
-export async function saveSettings(data: Partial<Settings>): Promise<{ ok: boolean }> {
-  const r = await fetch(`${API_BASE}/settings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!r.ok) throw new Error("Failed to save settings");
-  return r.json();
-}
-
 export async function syncSheetToDb(): Promise<{ ok: boolean; added?: number; error?: string }> {
   const r = await fetch(`${API_BASE}/sync`, { method: "POST" });
-  return r.json();
-}
-
-export async function uploadCredentials(file: File): Promise<{ ok: boolean }> {
-  const form = new FormData();
-  form.append("file", file);
-  const r = await fetch(`${API_BASE}/settings/credentials`, {
-    method: "POST",
-    body: form,
-  });
-  if (!r.ok) throw new Error("Failed to upload credentials");
   return r.json();
 }

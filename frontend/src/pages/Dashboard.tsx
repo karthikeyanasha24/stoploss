@@ -54,18 +54,20 @@ export default function Dashboard() {
   const [rangeTo, setRangeTo] = useState<string>("");
   const [syncing, setSyncing] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [tradesData, analysisData] = await Promise.all([fetchTrades(), fetchAnalysis()]);
       setTrades(tradesData);
       setTradesReady(analysisData.total_trades_analyzed ?? 0);
       setLastUpdate(new Date());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load trades");
+      if (showLoading) setError(e instanceof Error ? e.message : "Failed to load trades");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
@@ -74,6 +76,12 @@ export default function Dashboard() {
     const onSettingsSaved = () => load();
     window.addEventListener("settings-saved", onSettingsSaved);
     return () => window.removeEventListener("settings-saved", onSettingsSaved);
+  }, [load]);
+
+  // Auto-refresh every 30s: live sheet data + live API prices
+  useEffect(() => {
+    const interval = setInterval(() => load(false), 30000);
+    return () => clearInterval(interval);
   }, [load]);
 
   async function handleSyncFromSheet() {
@@ -245,6 +253,7 @@ export default function Dashboard() {
               <p className="mt-2 text-lg font-medium text-foreground">
                 {lastUpdate ? lastUpdate.toLocaleTimeString() : "—"}
               </p>
+              <p className="mt-1 text-xs text-muted-foreground">Auto-refreshes every 30s</p>
             </div>
           </>
         )}

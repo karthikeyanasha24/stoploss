@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "./lib/theme";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
@@ -6,7 +6,6 @@ import TradeDetails from "./pages/TradeDetails";
 import Analysis from "./pages/Analysis";
 import SheetReference from "./pages/SheetReference";
 import Logs from "./pages/Logs";
-import Settings from "./pages/Settings";
 
 export default function App() {
   return (
@@ -18,7 +17,7 @@ export default function App() {
           <Route path="/analysis" element={<Analysis />} />
           <Route path="/sheet-reference" element={<SheetReference />} />
           <Route path="/logs" element={<Logs />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </ThemeProvider>
