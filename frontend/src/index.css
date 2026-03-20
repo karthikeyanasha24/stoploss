@@ -49,3 +49,20 @@ html {
 body {
   @apply antialiased;
 }
+
+/* Smooth momentum scrolling on iOS for overflow-x-auto containers */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Hide scrollbars on horizontal filter strips while keeping scroll behaviour */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 3px;
+}
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+}
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}

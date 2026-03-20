@@ -190,7 +190,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -201,7 +201,7 @@ export default function Dashboard() {
           type="button"
           onClick={handleSyncFromSheet}
           disabled={syncing || loading}
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50 disabled:opacity-50"
+          className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50 disabled:opacity-50"
         >
           {syncing ? (
             "Syncing…"
@@ -261,7 +261,7 @@ export default function Dashboard() {
 
       {/* Active Trades Table */}
       <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="px-4 sm:px-6 py-4 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Active Trades</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -297,75 +297,78 @@ export default function Dashboard() {
                 </>
               )}
             </button>
-            <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs sm:text-sm">
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterPreset("all");
-                  setPage(0);
-                }}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  filterPreset === "all" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterPreset("today");
-                  setPage(0);
-                }}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  filterPreset === "today"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterPreset("last2");
-                  setPage(0);
-                }}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  filterPreset === "last2"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Last 2 days
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterPreset("last3");
-                  setPage(0);
-                }}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  filterPreset === "last3"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Last 3 days
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterPreset("last7");
-                  setPage(0);
-                }}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  filterPreset === "last7"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Last 7 days
-              </button>
+            {/* Filter presets — horizontally scrollable on mobile */}
+            <div className="w-full overflow-x-auto pb-0.5 sm:w-auto">
+              <div className="inline-flex min-w-max rounded-lg border border-border bg-muted/40 p-0.5 text-xs sm:text-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterPreset("all");
+                    setPage(0);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
+                    filterPreset === "all" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterPreset("today");
+                    setPage(0);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
+                    filterPreset === "today"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterPreset("last2");
+                    setPage(0);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
+                    filterPreset === "last2"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Last 2 days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterPreset("last3");
+                    setPage(0);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
+                    filterPreset === "last3"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Last 3 days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterPreset("last7");
+                    setPage(0);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
+                    filterPreset === "last7"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Last 7 days
+                </button>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
               <span className="text-muted-foreground">Custom range:</span>
