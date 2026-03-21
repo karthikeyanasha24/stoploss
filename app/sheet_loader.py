@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import time
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 from . import config
 
@@ -15,6 +16,32 @@ logger = __import__("logging").getLogger(__name__)
 
 # Must match inspect_google_sheet.py (tabs often have title rows before Date/Ticker/Entry header).
 HEADER_SCAN_ROWS = 80
+
+# Space out per-tab reads to reduce 429 "Read requests per minute per user" when many worksheets exist.
+_SHEET_READ_INTERVAL_SEC = 1.25
+
+
+def _get_all_values_throttled(ws, sheet_index: int):
+    """Read all cells from a worksheet; throttle across tabs and retry on quota errors."""
+    if sheet_index > 0:
+        time.sleep(_SHEET_READ_INTERVAL_SEC)
+    delay = 2.0
+    for attempt in range(6):
+        try:
+            return ws.get_all_values()
+        except Exception as e:
+            err = str(e).lower()
+            if ("429" in str(e) or "quota" in err) and attempt < 5:
+                logger.warning(
+                    "Sheets read backoff tab=%s attempt=%s: %s",
+                    getattr(ws, "title", "?"),
+                    attempt + 1,
+                    e,
+                )
+                time.sleep(delay)
+                delay = min(delay * 1.5, 90.0)
+                continue
+            raise
 
 
 def _get_client():
@@ -107,6 +134,11 @@ def _is_take_profit_header(value: Any) -> bool:
     normalized = _normalize_header(value)
     if not normalized:
         return False
+    # Do not treat size / P&L columns as take-profit levels
+    if normalized in {"numbers", "number", "qty", "quantity", "contracts", "size"}:
+        return False
+    if any(x in normalized for x in ("profit", "loss", "remark", "status", "maxprofit")):
+        return False
     return (
         normalized in {"tp", "target", "targets", "takeprofit", "takeprofits"}
         or normalized.startswith("tp")
@@ -131,17 +163,60 @@ def _parse_take_profit_values(headers: List[Any], row: List[Any]) -> List[float]
 
 
 def _column_has_exit_alias(header_cell: Any) -> bool:
-    """Match 'Exit' but not 'Expiry'."""
+    """Match 'Exit' / 'Exit price' but not 'Expiry'."""
     c = str(header_cell).strip().lower()
-    if "exit" not in c:
-        return False
     if "expiry" in c:
+        return False
+    n = _normalize_header(header_cell)
+    if n == "exit" or (n.startswith("exit") and "expiry" not in c):
+        return True
+    if "exit" not in c:
         return False
     return True
 
 
-def _find_exit_column_index(header_row: List[Any], col_entry: Optional[int] = None) -> Optional[int]:
-    """Locate Exit / take-profit price column. Many sheets use 'Take Profit' without the word 'exit'."""
+def _find_lowest_before_tp_column_index(header_row: List[Any]) -> Optional[int]:
+    """
+    Optional column: lowest premium after entry before TP1 (manual journal / MAE).
+    Aliases: 'Lowest Price Before TP1', 'Min Before TP1', 'MAE', etc.
+    """
+    for i, cell in enumerate(header_row):
+        c = str(cell).strip().lower()
+        if "expiry" in c:
+            continue
+        n = _normalize_header(cell)
+        if n in ("lowestbeforetp1", "minbeforetp1", "lowbeforetp1", "minpricetp1", "lowestbeforetp"):
+            return i
+        if "lowest" in c and "tp" in c and "before" in c:
+            return i
+        if "min" in c and "before" in c and "tp" in c:
+            return i
+        if n == "mae":
+            return i
+        if "max adverse" in c:
+            return i
+        if "lowest price" in c and "before" in c:
+            return i
+    return None
+
+
+def _header_looks_like_numbers_or_size_column(header_cell: Any) -> bool:
+    """Entry → Numbers → Exit layouts: detect the middle 'Numbers' / contracts column."""
+    n = _normalize_header(header_cell)
+    if n in {"numbers", "number", "qty", "quantity", "contracts", "size"}:
+        return True
+    s = str(header_cell).strip().lower()
+    return "position" in s and "%" in s
+
+
+# Option premium band for TP detection (typical short-dated options)
+TP_PREMIUM_MIN = 0.1
+TP_PREMIUM_MAX = 100.0
+_INFER_SAMPLE_ROWS = 10
+
+
+def _find_exit_column_index_explicit(header_row: List[Any], col_entry: Optional[int]) -> Optional[int]:
+    """Header-based Exit / Take Profit / TP1 — no guessing from Entry+1."""
     for i, cell in enumerate(header_row):
         if _column_has_exit_alias(cell):
             return i
@@ -149,29 +224,178 @@ def _find_exit_column_index(header_row: List[Any], col_entry: Optional[int] = No
         n = _normalize_header(cell)
         if not n:
             continue
-        # "Take Profit", "Take Profits", "TP", "TP1" — but not Ticker
         if n in ("takeprofit", "takeprofits", "takeprofitlevels"):
             return i
         if n == "tp":
             return i
         if n.startswith("tp") and len(n) <= 4 and n[2:].isdigit():
             return i
-    # Legacy: separate TP columns or Target
     idx = _column_index(header_row, ["tp1", "tp2", "take profit", "target", "targets"])
     if idx is not None:
         return idx
-    # Layout fallback: column immediately to the right of Entry (typical: Exit, then Numbers / %)
-    if col_entry is not None:
-        j = col_entry + 1
-        if j < len(header_row):
-            return j
     return None
+
+
+def _find_exit_column_index_fallback(header_row: List[Any], col_entry: Optional[int]) -> Optional[int]:
+    """Entry → Exit or Entry → Numbers → Exit when headers are minimal."""
+    if col_entry is None:
+        return None
+    j1 = col_entry + 1
+    j2 = col_entry + 2
+    if j1 < len(header_row) and _header_looks_like_numbers_or_size_column(header_row[j1]):
+        if j2 < len(header_row) and (
+            _column_has_exit_alias(header_row[j2])
+            or _normalize_header(header_row[j2]) == "exit"
+        ):
+            return j2
+    if j1 < len(header_row):
+        return j1
+    return None
+
+
+def _extract_tp_values_for_inference(cell_val: Any) -> List[float]:
+    """Currency-like values in typical option premium range for exit-column scoring."""
+    if cell_val is None or not str(cell_val).strip():
+        return []
+    s0 = str(cell_val).strip()
+    if re.fullmatch(r"[\s\-]*\d+(?:\.\d+)?\s*%", s0):
+        return []
+    out: list[float] = []
+    for m in re.finditer(r"\$\s*(\d+(?:\.\d+)?)", s0.replace(",", "")):
+        try:
+            v = float(m.group(1))
+            if TP_PREMIUM_MIN <= v <= TP_PREMIUM_MAX:
+                out.append(round(v, 4))
+        except ValueError:
+            continue
+    if out:
+        return out
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(?:%|\s+\d+\s*%|\s*$)", s0)
+    if m:
+        try:
+            raw = m.group(1)
+            v = float(raw)
+            if "." not in raw and v < 10:
+                return []
+            if TP_PREMIUM_MIN <= v <= TP_PREMIUM_MAX:
+                return [round(v, 4)]
+        except ValueError:
+            pass
+    return []
+
+
+def _infer_exit_column_from_sample_rows(
+    rows: List[List[Any]],
+    header_idx: int,
+    col_entry: int,
+    col_ticker: Optional[int],
+    col_date: Optional[int],
+    header_width: int,
+) -> Optional[int]:
+    """
+    When there is no explicit Exit header, find the column with the most premium-like values
+    in the first rows after the header (anchor + continuation rows).
+    """
+    start = header_idx + 1
+    end = min(len(rows), header_idx + 1 + _INFER_SAMPLE_ROWS)
+    scores: dict[int, int] = {}
+    for ri in range(start, end):
+        row = rows[ri]
+        if not row:
+            continue
+        max_c = min(len(row), header_width)
+        for c in range(max_c):
+            if c == col_entry:
+                continue
+            if col_ticker is not None and c == col_ticker:
+                continue
+            if col_date is not None and c == col_date:
+                continue
+            vals = _extract_tp_values_for_inference(row[c] if c < len(row) else None)
+            if vals:
+                scores[c] = scores.get(c, 0) + len(vals)
+
+    candidates = [c for c, s in scores.items() if s >= 2]
+    if not candidates:
+        # Sparse tabs: only one row in the sample may have exits — still pick best column
+        singles = [(c, s) for c, s in scores.items() if s >= 1]
+        if not singles:
+            return None
+        best_score = max(s for _, s in singles)
+        contenders = [c for c, s in singles if s == best_score]
+        if len(contenders) == 1:
+            return contenders[0]
+        return min(contenders, key=lambda c: abs(c - col_entry))
+    best = max(scores[c] for c in candidates)
+    top = [c for c in candidates if scores[c] == best]
+    if len(top) == 1:
+        return top[0]
+    return min(top, key=lambda c: abs(c - col_entry))
+
+
+def _find_exit_column_index(
+    header_row: List[Any],
+    col_entry: Optional[int] = None,
+    sample_rows: Optional[List[List[Any]]] = None,
+    header_idx: int = 0,
+    col_ticker: Optional[int] = None,
+    col_date: Optional[int] = None,
+) -> Optional[int]:
+    """
+    Locate Exit / take-profit price column.
+    1) Explicit header (Exit, Take Profit, TP1, …)
+    2) Else infer from first ~10 data rows (most $ / decimal premiums in range)
+    3) Else Entry+1 / Entry → Numbers → Exit fallback
+    """
+    explicit = _find_exit_column_index_explicit(header_row, col_entry)
+    if explicit is not None:
+        return explicit
+    if (
+        sample_rows
+        and col_entry is not None
+        and header_idx < len(sample_rows)
+    ):
+        inferred = _infer_exit_column_from_sample_rows(
+            sample_rows,
+            header_idx,
+            col_entry,
+            col_ticker,
+            col_date,
+            max(len(header_row), col_entry + 8),
+        )
+        if inferred is not None:
+            return inferred
+    return _find_exit_column_index_fallback(header_row, col_entry)
 
 
 def _row_cell(row: List[Any], col: Optional[int]) -> str:
     if col is None or col >= len(row):
         return ""
     return str(row[col]).strip() if row[col] is not None else ""
+
+
+def _extract_relaxed_tp_premiums_from_cell(val: Any) -> List[float]:
+    """
+    Bare decimals in [TP_PREMIUM_MIN, TP_PREMIUM_MAX] when $ not used (e.g. '4.70' or '4.70 20%').
+    Requires a decimal part (x.xx) so Numbers column integers like contract counts are ignored.
+    """
+    if val is None or not str(val).strip():
+        return []
+    s0 = str(val).strip()
+    if "$" in s0:
+        return []
+    if re.fullmatch(r"[\s\-]*\d+(?:\.\d+)?\s*%", s0):
+        return []
+    m = re.match(r"^\s*(\d+\.\d+)\s*(?:%|\s+\d+\s*%|\s*$)", s0)
+    if not m:
+        return []
+    try:
+        v = float(m.group(1))
+    except ValueError:
+        return []
+    if TP_PREMIUM_MIN <= v <= TP_PREMIUM_MAX:
+        return [round(v, 4)]
+    return []
 
 
 def _extract_exit_prices_from_cell(val: Any) -> List[float]:
@@ -198,7 +422,14 @@ def _extract_exit_prices_from_cell(val: Any) -> List[float]:
     m2 = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(?:\(|%|$)", s)
     if m2:
         try:
-            v = float(m2.group(1))
+            raw = m2.group(1)
+            v = float(raw)
+            if "$" not in s0 and "." not in raw:
+                # Bare integers without $ (e.g. "10", "20", "30") are contract counts,
+                # not option premiums — reject all of them regardless of magnitude.
+                return []
+            if v >= 100:
+                return []
             if 0 < v <= 50000:
                 return [round(v, 4)]
         except ValueError:
@@ -215,7 +446,8 @@ def _is_anchor_row(
     """
     A main trade row (not an Exit/Numbers continuation row).
     Continuation rows usually have an empty Ticker cell, or repeat the ticker with empty Entry
-    and empty Date (merged cells). Anchors have a positive Entry and/or a Date when Entry is blank.
+    (sometimes with Date still filled). Only rows with a positive Entry cell count as anchors;
+    otherwise multi-row TP scanning would stop at the first continuation line.
     """
     ticker_raw = _row_cell(row, col_ticker)
     if not ticker_raw:
@@ -234,10 +466,9 @@ def _is_anchor_row(
     if parsed is None:
         return False
 
-    # Parsed ticker but no Entry: either invalid_entry (has Date) or merged continuation (no Date)
-    if col_date is not None:
-        return bool(_row_cell(row, col_date).strip())
-    return True
+    # Ticker parses but no positive entry: continuation row (often repeats ticker + date with exits
+    # on the same row) — must NOT be treated as a new anchor or multi-row TP collection stops early.
+    return False
 
 
 def _dedupe_sorted_prices(prices: List[float]) -> List[float]:
@@ -251,6 +482,120 @@ def _dedupe_sorted_prices(prices: List[float]) -> List[float]:
     return out
 
 
+def _dedupe_preserve_order(prices: List[float]) -> List[float]:
+    """Unique exit prices in first-seen order (sheet / time order for TP1)."""
+    seen: set[float] = set()
+    out: list[float] = []
+    for p in prices:
+        r = round(p, 4)
+        if r > 0 and r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
+
+
+def _find_profit_loss_column_index(header_row: List[Any]) -> Optional[int]:
+    """Column like 'Profit/Loss' on March-style logs — used to skip TP extraction when status is Loss."""
+    for i, h in enumerate(header_row):
+        s = str(h).strip().lower()
+        if "exit" in s and "expiry" not in s:
+            continue
+        if "profit" in s and "loss" in s:
+            return i
+        n = _normalize_header(h)
+        if n in ("profitloss", "pl", "pnl"):
+            return i
+    return None
+
+
+def _anchor_profit_loss_is_loss(rows: List[List[Any]], anchor_idx: int, header_row: List[Any]) -> bool:
+    """If the anchor row marks Profit/Loss as plain 'Loss', do not attach take-profit targets."""
+    col = _find_profit_loss_column_index(header_row)
+    if col is None:
+        return False
+    row = rows[anchor_idx]
+    if col >= len(row):
+        return False
+    cell = str(row[col]).strip().lower()
+    if not cell:
+        return False
+    if cell == "loss":
+        return True
+    if cell.startswith("loss") and "profit" not in cell:
+        return True
+    return False
+
+
+def _column_is_noise_for_tp_pattern_scan(header_cell: Any) -> bool:
+    """
+    Skip columns that never contain exit premiums (Date, Remarks, P/L summary).
+    Do not skip Exit / Numbers / TP — even if header text contains '%' elsewhere.
+    """
+    if header_cell is None:
+        return False
+    if _column_has_exit_alias(header_cell):
+        return False
+    s = str(header_cell).strip().lower()
+    if not s:
+        return False
+    n = _normalize_header(header_cell)
+    if n == "date":
+        return True
+    if "remark" in s:
+        return True
+    if "max profit" in s or "max profit (loss)" in s:
+        return True
+    if "profit" in s and "loss" in s and "exit" not in s:
+        return True
+    if s == "direction" or n.startswith("direction"):
+        return True
+    return False
+
+
+def _extract_tp_candidates_from_row_pattern(
+    row: List[Any],
+    header_row: List[Any],
+    col_entry: int,
+    col_min_before_tp1: Optional[int],
+) -> List[float]:
+    """
+    Pattern-based: pull premium-like values from every cell except Entry (and manual MAE column).
+    When the row is width-aligned with the header, skip known non-exit columns (Date, P/L, Remarks).
+    Short / sparse continuation rows are not aligned — scan all cells so misaligned exits still parse.
+    """
+    out: list[float] = []
+    aligned = len(row) >= len(header_row) and len(header_row) > 0
+    for j, cell in enumerate(row):
+        if j == col_entry:
+            continue
+        if col_min_before_tp1 is not None and j == col_min_before_tp1:
+            continue
+        if aligned and j < len(header_row) and _column_is_noise_for_tp_pattern_scan(header_row[j]):
+            continue
+        out.extend(_extract_exit_prices_from_cell(cell))
+        out.extend(_extract_relaxed_tp_premiums_from_cell(cell))
+    return out
+
+
+def _filter_tp_candidates_for_long_option(candidates: Iterable[float], entry: float) -> List[float]:
+    """
+    Keep only values that are plausible take-profit *premiums* for a long option vs entry:
+    strictly above entry, within typical premium band (excludes strike/index noise, huge P/L %).
+    """
+    out: list[float] = []
+    for v in candidates:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            continue
+        if x <= entry:
+            continue
+        if x < TP_PREMIUM_MIN or x > TP_PREMIUM_MAX:
+            continue
+        out.append(round(x, 4))
+    return out
+
+
 def _exit_prices_fallback_cells_to_right_of_entry(row: List[Any], col_entry: int) -> List[float]:
     """
     If Exit column index is off by one or the sheet uses an unlabeled TP cell, premiums often sit
@@ -261,7 +606,9 @@ def _exit_prices_fallback_cells_to_right_of_entry(row: List[Any], col_entry: int
     start = col_entry + 1
     end = min(len(row), start + 8)
     for j in range(start, end):
-        out.extend(_extract_exit_prices_from_cell(_row_cell(row, j)))
+        cell = _row_cell(row, j)
+        out.extend(_extract_exit_prices_from_cell(cell))
+        out.extend(_extract_relaxed_tp_premiums_from_cell(cell))
     return out
 
 
@@ -273,43 +620,49 @@ def _collect_exit_prices_multi_row(
     col_exit: Optional[int],
     header_idx: int,
     col_date: Optional[int] = None,
-) -> List[float]:
+    entry_price: Optional[float] = None,
+    col_min_before_tp1: Optional[int] = None,
+) -> Tuple[List[float], List[float]]:
     """
-    Collect Exit column prices for a trade whose anchor row is at anchor_idx.
-    Trades span multiple rows: take profits are in the Exit column on the anchor row
-    and continuation rows BELOW (Google Sheets layout). Rows above the anchor belong
-    to the previous trade and must not be included.
+    Block-based take-profit extraction (pattern + row relationships), not Exit-column-only.
+
+    For the trade block starting at anchor_idx (anchor row + continuation rows until the next
+    anchor), scan cells for premium-like values, skip Entry / MAE / noisy header columns when
+    aligned, merge legacy TP1/TP2 header columns, then keep only values strictly above entry
+    and within TP_PREMIUM_MIN..TP_PREMIUM_MAX.
+
+    col_exit is still used by _normalize_sheet_rows for sparse row left-padding; extraction does
+    not require a correct Exit index when entry_price is known.
     """
-    if col_exit is None:
-        return []
+    if entry_price is None or entry_price <= 0:
+        return [], []
+
+    header_row = rows[header_idx] if header_idx < len(rows) else []
+    if _anchor_profit_loss_is_loss(rows, anchor_idx, header_row):
+        return [], []
 
     collected: list[float] = []
 
-    def _add_exit_cells_for_row(row: List[Any]) -> None:
-        cell = _row_cell(row, col_exit)
-        parsed = _extract_exit_prices_from_cell(cell) if cell else []
-        if parsed:
-            collected.extend(parsed)
-        else:
-            collected.extend(_exit_prices_fallback_cells_to_right_of_entry(row, col_entry))
-
-    # Anchor row
-    _add_exit_cells_for_row(rows[anchor_idx])
-
-    # Rows below anchor until next anchor
-    j = anchor_idx + 1
+    j = anchor_idx
     while j < len(rows):
         row = rows[j]
-        if _is_anchor_row(row, col_ticker, col_entry, col_date):
+        if j > anchor_idx and _is_anchor_row(row, col_ticker, col_entry, col_date):
             break
-        _add_exit_cells_for_row(row)
+        collected.extend(
+            _extract_tp_candidates_from_row_pattern(
+                row, header_row, col_entry, col_min_before_tp1
+            )
+        )
         j += 1
 
-    # Also merge legacy same-row TP columns if present
-    hdr = rows[header_idx] if header_idx < len(rows) else []
-    collected.extend(_parse_take_profit_values(hdr, rows[anchor_idx]))
+    # Legacy: extra TP columns (TP1, TP2, …) on the header row
+    if header_idx < len(rows):
+        collected.extend(_parse_take_profit_values(rows[header_idx], rows[anchor_idx]))
 
-    return _dedupe_sorted_prices(collected)
+    filtered = _filter_tp_candidates_for_long_option(collected, float(entry_price))
+    ordered = _dedupe_preserve_order(filtered)
+    sorted_unique = _dedupe_sorted_prices(filtered)
+    return sorted_unique, ordered
 
 
 def _header_looks_like_trade_row(row: List[Any]) -> bool:
@@ -367,6 +720,19 @@ def _looks_like_sparse_exit_continuation(row: List[Any], col_exit: Optional[int]
         return False
     if re.match(r"^\$\s*[\d,]+(?:\.\d+)?", fs):
         return True
+    # Bare decimal premium (e.g. 4.70) or '4.70 20%' in first cell
+    if re.match(r"^\s*\d+(?:\.\d+)?\s*$", fs):
+        return True
+    if re.match(r"^\s*\d+(?:\.\d+)?\s*%", fs):
+        return True
+    if re.match(r"^\s*\d+(?:\.\d+)?\s+\d+\s*%", fs):
+        return True
+    # Two cells: [decimal, percentage]
+    if len(row) >= 2:
+        a = str(row[0]).strip() if row[0] is not None else ""
+        b = str(row[1]).strip() if row[1] is not None else ""
+        if re.match(r"^\s*\d+(?:\.\d+)?\s*$", a) and re.fullmatch(r"\d+(?:\.\d+)?\s*%", b):
+            return True
     return False
 
 
@@ -377,13 +743,14 @@ def _normalize_sheet_rows(
     col_ticker: int,
     col_entry: int,
     col_exit: Optional[int],
+    col_min_before_tp1: Optional[int] = None,
 ) -> List[List[Any]]:
     """
     gspread often omits **trailing** empty cells (right-pad) and sometimes **leading** empties
     on continuation rows (left-pad so Exit column index matches the header).
     """
     width = len(headers)
-    for c in (col_date, col_ticker, col_entry, col_exit):
+    for c in (col_date, col_ticker, col_entry, col_exit, col_min_before_tp1):
         if c is not None:
             width = max(width, c + 1)
     out: List[List[Any]] = []
@@ -404,6 +771,7 @@ def _trade_dicts_from_sheet_rows(
     col_ticker: int,
     col_entry: int,
     col_exit: Optional[int],
+    col_min_before_tp1: Optional[int] = None,
 ) -> List[dict]:
     """
     Walk normalized rows and emit one dict per option trade.
@@ -490,9 +858,20 @@ def _trade_dicts_from_sheet_rows(
         if col_date is not None and col_date < len(row):
             trade_date = _parse_date(row[col_date])
 
-        take_profit_targets = _collect_exit_prices_multi_row(
-            rows, i, col_ticker, col_entry, col_exit, header_idx, col_date
+        t_sorted, t_order = _collect_exit_prices_multi_row(
+            rows,
+            i,
+            col_ticker,
+            col_entry,
+            col_exit,
+            header_idx,
+            col_date,
+            entry_price=float(ep),
+            col_min_before_tp1=col_min_before_tp1,
         )
+        manual_min: Optional[float] = None
+        if col_min_before_tp1 is not None and col_min_before_tp1 < len(row):
+            manual_min = _clean_currency(row[col_min_before_tp1])
 
         last_emitted_ticker_raw = effective
 
@@ -502,12 +881,55 @@ def _trade_dicts_from_sheet_rows(
             "option_type": option_type,
             "expiry_date": expiry_date,
             "entry_price": ep,
-            "take_profit_targets": take_profit_targets,
+            "take_profit_targets": t_sorted,
+            "take_profit_targets_order": t_order,
+            "lowest_price_before_tp1_manual": manual_min,
             "trade_date": trade_date,
         })
         i += 1
 
     return out
+
+
+def _merge_duplicate_trades(trades: List[dict]) -> List[dict]:
+    """
+    The same option can appear more than once per workbook (repeated blocks, summary lines,
+    or the same alert pasted twice). SQLite UNIQUE is (ticker, strike, option_type, expiry, analyst)
+    — not entry_price — so the last row synced used to wipe take_profit_targets if it parsed
+    with no exits. Merge all exits for the same key (union, preserve first-seen order).
+    """
+    by_key: dict[tuple, dict] = {}
+    order_keys: list[tuple] = []
+    for t in trades:
+        k = (
+            t["ticker"],
+            round(float(t["strike_price"]), 4),
+            t["option_type"],
+            t["expiry_date"],
+            t["analyst_name"],
+        )
+        if k not in by_key:
+            by_key[k] = dict(t)
+            order_keys.append(k)
+            continue
+        cur = by_key[k]
+        a = list(cur.get("take_profit_targets") or [])
+        b = list(t.get("take_profit_targets") or [])
+        oa = list(cur.get("take_profit_targets_order") or [])
+        ob = list(t.get("take_profit_targets_order") or [])
+        merged_sorted = _dedupe_sorted_prices(a + b)
+        if not merged_sorted:
+            merged_sorted = _dedupe_sorted_prices(a) if a else _dedupe_sorted_prices(b)
+        merged_order = _dedupe_preserve_order(oa + ob)
+        if not merged_order:
+            merged_order = merged_sorted
+        cur["take_profit_targets"] = merged_sorted
+        cur["take_profit_targets_order"] = merged_order
+        if cur.get("lowest_price_before_tp1_manual") is None and t.get("lowest_price_before_tp1_manual"):
+            cur["lowest_price_before_tp1_manual"] = t["lowest_price_before_tp1_manual"]
+        if cur.get("trade_date") is None and t.get("trade_date"):
+            cur["trade_date"] = t["trade_date"]
+    return [by_key[k] for k in order_keys]
 
 
 def load_trades_from_sheet() -> List[dict]:
@@ -528,9 +950,9 @@ def load_trades_from_sheet() -> List[dict]:
         return []
 
     out: List[dict] = []
-    for ws in workbook.worksheets():
+    for idx, ws in enumerate(workbook.worksheets()):
         try:
-            rows = ws.get_all_values()
+            rows = _get_all_values_throttled(ws, idx)
         except Exception as e:
             logger.warning("Failed to read sheet %s: %s", ws.title, e)
             continue
@@ -551,18 +973,48 @@ def load_trades_from_sheet() -> List[dict]:
         col_date = _column_index(headers, ["date"])
         col_ticker = _column_index(headers, ["ticker", "ticker/strike", "strike"])
         col_entry = _column_index(headers, ["entry"])
-        col_exit = _find_exit_column_index(headers, col_entry)
+        col_exit = _find_exit_column_index(
+            headers,
+            col_entry,
+            sample_rows=rows,
+            header_idx=header_idx,
+            col_ticker=col_ticker,
+            col_date=col_date,
+        )
+        col_min_before_tp1 = _find_lowest_before_tp_column_index(headers)
 
         if col_ticker is None or col_entry is None:
             continue
 
-        rows = _normalize_sheet_rows(rows, headers, col_date, col_ticker, col_entry, col_exit)
+        if getattr(config, "SHEET_PARSE_DEBUG", False):
+            logger.info(
+                "sheet parse [%s]: col_date=%s col_ticker=%s col_entry=%s col_exit=%s",
+                ws.title,
+                col_date,
+                col_ticker,
+                col_entry,
+                col_exit,
+            )
+
+        rows = _normalize_sheet_rows(
+            rows, headers, col_date, col_ticker, col_entry, col_exit, col_min_before_tp1
+        )
 
         for t in _trade_dicts_from_sheet_rows(
-            rows, header_idx, col_date, col_ticker, col_entry, col_exit
+            rows, header_idx, col_date, col_ticker, col_entry, col_exit, col_min_before_tp1
         ):
-            out.append({**t, "analyst_name": ws.title})
-    return out
+            if getattr(config, "SHEET_PARSE_DEBUG", False):
+                logger.info(
+                    "sheet parse [%s]: ticker=%s strike=%s entry=%s TPs=%s order=%s",
+                    ws.title,
+                    t.get("ticker"),
+                    t.get("strike_price"),
+                    t.get("entry_price"),
+                    t.get("take_profit_targets"),
+                    t.get("take_profit_targets_order"),
+                )
+            out.append({**t, "analyst_name": (ws.title or "").strip()})
+    return _merge_duplicate_trades(out)
 
 
 def load_all_trades_from_sheet_verbose() -> dict:
@@ -583,9 +1035,9 @@ def load_all_trades_from_sheet_verbose() -> dict:
     today = dt.date.today()
     out_sheets = []
 
-    for ws in workbook.worksheets():
+    for idx, ws in enumerate(workbook.worksheets()):
         try:
-            rows = ws.get_all_values()
+            rows = _get_all_values_throttled(ws, idx)
         except Exception as e:
             out_sheets.append({"name": ws.title, "error": str(e), "trades": []})
             continue
@@ -607,12 +1059,22 @@ def load_all_trades_from_sheet_verbose() -> dict:
         col_date = _column_index(headers, ["date"])
         col_ticker = _column_index(headers, ["ticker", "ticker/strike", "strike"])
         col_entry = _column_index(headers, ["entry"])
-        col_exit = _find_exit_column_index(headers, col_entry)
+        col_exit = _find_exit_column_index(
+            headers,
+            col_entry,
+            sample_rows=rows,
+            header_idx=header_idx,
+            col_ticker=col_ticker,
+            col_date=col_date,
+        )
+        col_min_before_tp1 = _find_lowest_before_tp_column_index(headers)
         if col_ticker is None or col_entry is None:
             out_sheets.append({"name": ws.title, "trades": [], "skip_reason": "Missing Ticker or Entry column"})
             continue
 
-        rows = _normalize_sheet_rows(rows, headers, col_date, col_ticker, col_entry, col_exit)
+        rows = _normalize_sheet_rows(
+            rows, headers, col_date, col_ticker, col_entry, col_exit, col_min_before_tp1
+        )
 
         sheet_trades = []
         pending_parts: List[str] = []
@@ -668,9 +1130,20 @@ def load_all_trades_from_sheet_verbose() -> dict:
                 continue
 
             anchor_idx = i
-            take_profit_targets = _collect_exit_prices_multi_row(
-                rows, anchor_idx, col_ticker, col_entry, col_exit, header_idx, col_date
+            t_sorted, t_order = _collect_exit_prices_multi_row(
+                rows,
+                anchor_idx,
+                col_ticker,
+                col_entry,
+                col_exit,
+                header_idx,
+                col_date,
+                entry_price=float(ep),
+                col_min_before_tp1=col_min_before_tp1,
             )
+            manual_min: Optional[float] = None
+            if col_min_before_tp1 is not None and col_min_before_tp1 < len(rows[anchor_idx]):
+                manual_min = _clean_currency(rows[anchor_idx][col_min_before_tp1])
 
             ticker_raw = effective
             parsed = _parse_ticker_strike(effective)
@@ -685,7 +1158,9 @@ def load_all_trades_from_sheet_verbose() -> dict:
                         "option_type": None,
                         "expiry_date": None,
                         "entry_price": float(ep),
-                        "take_profit_targets": take_profit_targets,
+                        "take_profit_targets": t_sorted,
+                        "take_profit_targets_order": t_order,
+                        "lowest_price_before_tp1_manual": manual_min,
                         "status": "futures",
                         "reason": "Futures or index level — only options (e.g. SPX 6020C Exp:01/31/2025) are tracked on dashboard",
                     })
@@ -697,7 +1172,9 @@ def load_all_trades_from_sheet_verbose() -> dict:
                         "option_type": None,
                         "expiry_date": None,
                         "entry_price": float(ep),
-                        "take_profit_targets": take_profit_targets,
+                        "take_profit_targets": t_sorted,
+                        "take_profit_targets_order": t_order,
+                        "lowest_price_before_tp1_manual": manual_min,
                         "status": "parse_failed",
                         "reason": "Could not parse Ticker/Strike — use format like SPX 6020C or QQQ 525C Exp:01/31/2025 (C=Call, P=Put)",
                     })
@@ -716,7 +1193,9 @@ def load_all_trades_from_sheet_verbose() -> dict:
                     "option_type": option_type,
                     "expiry_date": None,
                     "entry_price": float(ep),
-                    "take_profit_targets": take_profit_targets,
+                    "take_profit_targets": t_sorted,
+                    "take_profit_targets_order": t_order,
+                    "lowest_price_before_tp1_manual": manual_min,
                     "status": "no_expiry",
                     "reason": "No expiry (Exp:) in Ticker/Strike — add Exp:MM/DD/YYYY to be tracked on dashboard",
                 })
@@ -736,7 +1215,9 @@ def load_all_trades_from_sheet_verbose() -> dict:
                     "option_type": option_type,
                     "expiry_date": expiry_date.isoformat(),
                     "entry_price": float(ep),
-                    "take_profit_targets": take_profit_targets,
+                    "take_profit_targets": t_sorted,
+                    "take_profit_targets_order": t_order,
+                    "lowest_price_before_tp1_manual": manual_min,
                     "status": "expired",
                     "reason": f"Expired on {expiry_date.isoformat()} — only active (non-expired) options appear on dashboard",
                 })
@@ -750,7 +1231,9 @@ def load_all_trades_from_sheet_verbose() -> dict:
                 "option_type": option_type,
                 "expiry_date": expiry_date.isoformat(),
                 "entry_price": float(ep),
-                "take_profit_targets": take_profit_targets,
+                "take_profit_targets": t_sorted,
+                "take_profit_targets_order": t_order,
+                "lowest_price_before_tp1_manual": manual_min,
                 "status": "on_dashboard",
                 "reason": "Active trade — tracked on dashboard",
             })

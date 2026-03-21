@@ -34,6 +34,16 @@ def _get_bool(key: str, default: bool) -> bool:
     return val in ("true", "1", "yes", "on")
 
 
+def _get_float(key: str, default: float) -> float:
+    val = _get(key, str(default))
+    if not val:
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
+
+
 def _credentials_path() -> str:
     """Credentials: uploaded file first, else setting, else default credentials.json in project root.
 
@@ -147,11 +157,15 @@ MARKET_CLOSE: str = _get("MARKET_CLOSE", "16:00")
 
 ANALYSIS_DAYS: int = _get_int("ANALYSIS_DAYS", 7)
 STOP_PERCENTAGES: list = [15, 20, 25, 30, 35, 40]
+# Exclude trades with signed drawdown before TP1 <= this % from stop-% stats (lotto / extreme MAE)
+ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW: float = _get_float("ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW", -70.0)
 
 MOCK_API: bool = _get_bool("MOCK_API", False)
 PAPER_TRADING: bool = _get_bool("PAPER_TRADING", True)  # Tradier: sandbox vs live
 
 LOG_LEVEL: str = _get("LOG_LEVEL", "INFO")
+# Verbose sheet parse logging (columns, TPs before DB write) — set SHEET_PARSE_DEBUG=true
+SHEET_PARSE_DEBUG: bool = _get_bool("SHEET_PARSE_DEBUG", False)
 LOG_DIR: str = _get("LOG_DIR", "") or str(Path(__file__).resolve().parents[1] / "logs")
 if not Path(LOG_DIR).is_absolute():
     LOG_DIR = str(Path(__file__).resolve().parents[1] / LOG_DIR)
@@ -161,7 +175,7 @@ def reload_config() -> None:
     """Re-read settings from store and update module-level config. Call after saving settings."""
     global API_PROVIDER, API_KEY, API_BASE_URL, GOOGLE_CREDENTIALS_PATH, GOOGLE_CREDENTIALS_FROM_ENV, SPREADSHEET_ID
     global POLLING_INTERVAL, MARKET_TIMEZONE, MARKET_OPEN, MARKET_CLOSE
-    global ANALYSIS_DAYS, MOCK_API, PAPER_TRADING
+    global ANALYSIS_DAYS, ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW, MOCK_API, PAPER_TRADING, SHEET_PARSE_DEBUG
     _api_prov = _api_provider()
     _key_raw = (
         _get("API_KEY")
@@ -181,5 +195,7 @@ def reload_config() -> None:
     MARKET_OPEN = _get("MARKET_OPEN", "09:30")
     MARKET_CLOSE = _get("MARKET_CLOSE", "16:00")
     ANALYSIS_DAYS = _get_int("ANALYSIS_DAYS", 7)
+    ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW = _get_float("ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW", -70.0)
     MOCK_API = _get_bool("MOCK_API", False)
     PAPER_TRADING = _get_bool("PAPER_TRADING", True)
+    SHEET_PARSE_DEBUG = _get_bool("SHEET_PARSE_DEBUG", False)

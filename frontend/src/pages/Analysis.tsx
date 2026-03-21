@@ -51,7 +51,7 @@ export default function Analysis() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Stop-Loss Analysis</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Recommended stop levels based on drawdown from alert until the first take-profit hit
+          Drawdown on the path to TP1: (min price before TP1 − entry) / entry (negative % = underwater). TP1 is the first exit above entry in sheet order. Add column &quot;Lowest Price Before TP1&quot; for historical trades without full price logs.
         </p>
       </div>
 
@@ -82,6 +82,14 @@ export default function Analysis() {
                   Based on {data.total_trades_analyzed} trade{data.total_trades_analyzed === 1 ? "" : "s"} that hit a take-profit target after ≥{data.analysis_days ?? 7} days of tracking
                 </p>
               )}
+              {(data.excluded_lotto_outliers ?? 0) > 0 && (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Stop simulation uses {data.total_trades_for_stop_simulation ?? 0} trade
+                  {(data.total_trades_for_stop_simulation ?? 0) === 1 ? "" : "s"} (excluded{" "}
+                  {data.excluded_lotto_outliers} with signed drawdown ≤{" "}
+                  {data.excluded_signed_drawdown_threshold_percent ?? -70}% as lotto/outliers).
+                </p>
+              )}
               {(data.skipped_without_take_profit || data.skipped_without_take_profit_hit) ? (
                 <p className="mt-2 text-sm text-muted-foreground">
                   Skipped {data.skipped_without_take_profit ?? 0} trade{data.skipped_without_take_profit === 1 ? "" : "s"} with no take-profit target and {data.skipped_without_take_profit_hit ?? 0} trade{data.skipped_without_take_profit_hit === 1 ? "" : "s"} that have not hit their first take-profit yet.
@@ -100,6 +108,82 @@ export default function Analysis() {
           )}
         </div>
       </div>
+
+      {!loading && data?.drawdown_signed_summary && (
+        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 sm:px-6 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Signed drawdown (before TP1)</p>
+          <p className="mt-1">
+            All trades — Avg: {data.drawdown_signed_summary.average_percent ?? "—"}% · Min:{" "}
+            {data.drawdown_signed_summary.min_percent ?? "—"}% · Max:{" "}
+            {data.drawdown_signed_summary.max_percent ?? "—"}%
+          </p>
+          {(data.drawdown_signed_summary.average_percent_excluding_outliers != null ||
+            data.drawdown_signed_summary.min_percent_excluding_outliers != null) && (
+            <p className="mt-1">
+              Excluding signed ≤ {data.excluded_signed_drawdown_threshold_percent ?? -70}% — Avg:{" "}
+              {data.drawdown_signed_summary.average_percent_excluding_outliers ?? "—"}% · Min:{" "}
+              {data.drawdown_signed_summary.min_percent_excluding_outliers ?? "—"}% · Max:{" "}
+              {data.drawdown_signed_summary.max_percent_excluding_outliers ?? "—"}%
+            </p>
+          )}
+          {data.drawdown_signed_summary.note && (
+            <p className="mt-1 text-xs opacity-90">{data.drawdown_signed_summary.note}</p>
+          )}
+          {data.drawdown_signed_summary.outlier_note && (
+            <p className="mt-1 text-xs opacity-90">{data.drawdown_signed_summary.outlier_note}</p>
+          )}
+        </div>
+      )}
+
+      {!loading && data?.trades_detail && data.trades_detail.length > 0 && (
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="border-b border-border px-4 py-4 sm:px-6">
+            <h2 className="text-lg font-semibold text-foreground">Trades in this sample</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Entry, min before TP1, signed drawdown %, TP1 % (upside to first target)
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Ticker</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Entry</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Min before TP1</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">DD % (signed)</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">TP1 %</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Source</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Stop sim</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.trades_detail.map((row, idx) => (
+                  <tr
+                    key={idx}
+                    className={`border-b border-border hover:bg-muted/15 ${row.excluded_from_stop_analysis ? "opacity-75" : ""}`}
+                  >
+                    <td className="px-4 py-2 font-medium text-foreground">{row.ticker}</td>
+                    <td className="px-4 py-2 text-muted-foreground">${row.entry_price.toFixed(2)}</td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {row.min_price_before_tp1 != null ? `$${row.min_price_before_tp1.toFixed(2)}` : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {row.drawdown_percent_signed != null ? `${row.drawdown_percent_signed}%` : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {row.tp1_upside_percent != null ? `${row.tp1_upside_percent.toFixed(1)}%` : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground text-xs">{row.min_before_tp1_source ?? "—"}</td>
+                    <td className="px-4 py-2 text-muted-foreground text-xs">
+                      {row.excluded_from_stop_analysis ? "Excluded (outlier)" : "Included"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Stop Performance Table */}
       <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">

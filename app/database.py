@@ -13,6 +13,39 @@ from . import config
 from .models import Trade, TradeStats
 from .utils import compute_take_profit_metrics, normalize_take_profit_targets
 
+
+def _trade_stats_from_row(r: sqlite3.Row) -> TradeStats:
+    lp = r["last_price"] if "last_price" in r.keys() else None
+    ps = r["price_source"] if "price_source" in r.keys() else None
+    tp_hit: Optional[dt.datetime] = None
+    if "tp_hit_at" in r.keys() and r["tp_hit_at"]:
+        try:
+            tp_hit = dt.datetime.fromisoformat(str(r["tp_hit_at"]))
+        except (TypeError, ValueError):
+            tp_hit = None
+    thp = r["tp_hit_price"] if "tp_hit_price" in r.keys() else None
+    lb1 = r["lowest_price_before_tp1"] if "lowest_price_before_tp1" in r.keys() else None
+    lpa_raw = r["lowest_price_at"] if "lowest_price_at" in r.keys() else None
+    lpa: Optional[dt.datetime] = None
+    if lpa_raw:
+        try:
+            lpa = dt.datetime.fromisoformat(str(lpa_raw))
+        except (TypeError, ValueError):
+            lpa = None
+    return TradeStats(
+        trade_id=r["trade_id"],
+        lowest_price=float(r["lowest_price"]),
+        highest_price=float(r["highest_price"]),
+        max_drawdown_percent=float(r["max_drawdown_percent"]),
+        last_price=float(lp) if lp is not None else None,
+        last_updated=dt.datetime.fromisoformat(r["last_updated"]),
+        price_source=str(ps) if ps else None,
+        tp_hit_at=tp_hit,
+        tp_hit_price=float(thp) if thp is not None else None,
+        lowest_price_before_tp1=float(lb1) if lb1 is not None else None,
+        lowest_price_at=lpa,
+    )
+
 logger = __import__("logging").getLogger(__name__)
 
 
@@ -95,6 +128,40 @@ def init_schema(conn: Optional[sqlite3.Connection] = None) -> None:
             conn.commit()
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute(
+                "ALTER TABLE trades ADD COLUMN take_profit_targets_order TEXT NOT NULL DEFAULT '[]'"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute(
+                "ALTER TABLE trades ADD COLUMN lowest_price_before_tp1_manual REAL"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE trade_stats ADD COLUMN tp_hit_at TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE trade_stats ADD COLUMN tp_hit_price REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE trade_stats ADD COLUMN lowest_price_before_tp1 REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE trade_stats ADD COLUMN lowest_price_at TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
     finally:
         if close:
@@ -109,19 +176,25 @@ def insert_trade(
     entry_price: float,
     analyst_name: str,
     take_profit_targets: Optional[list[float]] = None,
+    take_profit_targets_order: Optional[list[float]] = None,
+    lowest_price_before_tp1_manual: Optional[float] = None,
     entry_time: Optional[dt.datetime] = None,
 ) -> Optional[int]:
     """Returns trade id or None if duplicate."""
     entry_time = entry_time or dt.datetime.utcnow()
     tracking_start = dt.datetime.utcnow()
-    take_profit_targets_json = json.dumps(normalize_take_profit_targets(take_profit_targets or []))
+    tps = normalize_take_profit_targets(take_profit_targets or [])
+    take_profit_targets_json = json.dumps(tps)
+    order_raw = take_profit_targets_order if take_profit_targets_order is not None else list(tps)
+    take_profit_order_json = json.dumps([round(float(x), 4) for x in order_raw])
     try:
         with _connect() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO trades (ticker, strike_price, option_type, expiry_date, entry_price,
-                    take_profit_targets, entry_time, analyst_name, status, tracking_start_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+                    take_profit_targets, take_profit_targets_order, lowest_price_before_tp1_manual,
+                    entry_time, analyst_name, status, tracking_start_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
                 """,
                 (
                     ticker,
@@ -130,6 +203,8 @@ def insert_trade(
                     expiry_date.isoformat(),
                     entry_price,
                     take_profit_targets_json,
+                    take_profit_order_json,
+                    lowest_price_before_tp1_manual,
                     entry_time.isoformat(),
                     analyst_name,
                     tracking_start.isoformat(),
@@ -138,21 +213,7 @@ def insert_trade(
             conn.commit()
             return cur.lastrowid
     except sqlite3.IntegrityError:
-        update_trade_take_profit_targets(
-            ticker=ticker,
-            strike_price=strike_price,
-            option_type=option_type,
-            expiry_date=expiry_date,
-            analyst_name=analyst_name,
-            take_profit_targets=take_profit_targets or [],
-        )
-        logger.info(
-            "Duplicate trade — refreshed take_profit_targets (%d levels) for %s %s %s",
-            len(normalize_take_profit_targets(take_profit_targets or [])),
-            ticker,
-            strike_price,
-            expiry_date.isoformat(),
-        )
+        # Caller (sync) always runs update_trade_sheet_fields so TPs refresh every sync.
         return None
 
 
@@ -164,16 +225,112 @@ def update_trade_take_profit_targets(
     analyst_name: str,
     take_profit_targets: list[float],
 ) -> None:
-    targets_json = json.dumps(normalize_take_profit_targets(take_profit_targets))
+    update_trade_sheet_fields(
+        ticker=ticker,
+        strike_price=strike_price,
+        option_type=option_type,
+        expiry_date=expiry_date,
+        analyst_name=analyst_name,
+        take_profit_targets=take_profit_targets,
+        take_profit_targets_order=None,
+        lowest_price_before_tp1_manual=None,
+        only_targets=True,
+    )
+
+
+def update_trade_sheet_fields(
+    ticker: str,
+    strike_price: float,
+    option_type: str,
+    expiry_date: dt.date,
+    analyst_name: str,
+    take_profit_targets: list[float],
+    take_profit_targets_order: Optional[list[float]] = None,
+    lowest_price_before_tp1_manual: Optional[float] = None,
+    only_targets: bool = False,
+) -> None:
+    """Refresh TPs from sheet; when only_targets=True, only update take_profit_targets column."""
+    tps = normalize_take_profit_targets(take_profit_targets)
+    order_src: list[float]
+    if take_profit_targets_order is not None:
+        order_src = [round(float(x), 4) for x in take_profit_targets_order]
+    else:
+        order_src = list(tps)
+
     with _connect() as conn:
-        conn.execute(
+        row = conn.execute(
+            """
+            SELECT take_profit_targets, take_profit_targets_order FROM trades
+            WHERE ticker = ? AND strike_price = ? AND option_type = ? AND expiry_date = ? AND analyst_name = ?
+            """,
+            (ticker, strike_price, option_type, expiry_date.isoformat(), analyst_name),
+        ).fetchone()
+
+    if row:
+        try:
+            existing_raw = json.loads(row["take_profit_targets"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            existing_raw = []
+        existing_tps = normalize_take_profit_targets(existing_raw)
+        if not tps and existing_tps:
+            tps = existing_tps
+            try:
+                eo = json.loads(row["take_profit_targets_order"] or "[]")
+                order_src = [round(float(x), 4) for x in eo if x is not None]
+            except (json.JSONDecodeError, TypeError, ValueError):
+                order_src = list(tps)
+            if getattr(config, "SHEET_PARSE_DEBUG", False):
+                logger.info(
+                    "DB TP preserve: kept existing TPs for %s %s %s (parsed empty)",
+                    ticker,
+                    strike_price,
+                    expiry_date.isoformat(),
+                )
+
+    targets_json = json.dumps(tps)
+    if only_targets:
+        with _connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE trades
+                SET take_profit_targets = ?
+                WHERE ticker = ? AND strike_price = ? AND option_type = ? AND expiry_date = ? AND analyst_name = ?
+                """,
+                (
+                    targets_json,
+                    ticker,
+                    strike_price,
+                    option_type,
+                    expiry_date.isoformat(),
+                    analyst_name,
+                ),
+            )
+            conn.commit()
+            if cur.rowcount == 0:
+                logger.warning(
+                    "update_trade_sheet_fields (targets only): no row matched for %s %s %s %s %s",
+                    ticker,
+                    strike_price,
+                    option_type,
+                    expiry_date.isoformat(),
+                    analyst_name,
+                )
+        return
+
+    order_json = json.dumps(order_src)
+    with _connect() as conn:
+        cur = conn.execute(
             """
             UPDATE trades
-            SET take_profit_targets = ?
+            SET take_profit_targets = ?,
+                take_profit_targets_order = ?,
+                lowest_price_before_tp1_manual = ?
             WHERE ticker = ? AND strike_price = ? AND option_type = ? AND expiry_date = ? AND analyst_name = ?
             """,
             (
                 targets_json,
+                order_json,
+                lowest_price_before_tp1_manual,
                 ticker,
                 strike_price,
                 option_type,
@@ -182,6 +339,15 @@ def update_trade_take_profit_targets(
             ),
         )
         conn.commit()
+        if cur.rowcount == 0:
+            logger.warning(
+                "update_trade_sheet_fields: no row matched for %s %s %s %s %s",
+                ticker,
+                strike_price,
+                option_type,
+                expiry_date.isoformat(),
+                analyst_name,
+            )
 
 
 def get_active_trades() -> List[Trade]:
@@ -199,10 +365,12 @@ def get_all_trades() -> List[Trade]:
 
 
 def get_all_trades_with_stats() -> List[tuple]:
-    """Returns (Trade, max_drawdown_percent, last_price, price_source, lowest_price) for each trade."""
+    """Returns (Trade, max_drawdown_percent, last_price, price_source, lowest_price,
+    tp_hit_at, tp_hit_price, lowest_price_before_tp1, lowest_price_at) for each trade."""
     with _connect() as conn:
         cur = conn.execute("""
-            SELECT t.*, s.max_drawdown_percent, s.last_price, s.price_source, s.lowest_price
+            SELECT t.*, s.max_drawdown_percent, s.last_price, s.price_source, s.lowest_price,
+                   s.tp_hit_at, s.tp_hit_price, s.lowest_price_before_tp1, s.lowest_price_at
             FROM trades t
             LEFT JOIN trade_stats s ON t.id = s.trade_id
             ORDER BY t.id
@@ -214,6 +382,10 @@ def get_all_trades_with_stats() -> List[tuple]:
             lp = r["last_price"] if "last_price" in r.keys() else None
             ps = r["price_source"] if "price_source" in r.keys() and r["price_source"] else "last"
             low = r["lowest_price"] if "lowest_price" in r.keys() else None
+            tp_hit_at = r["tp_hit_at"] if "tp_hit_at" in r.keys() else None
+            tp_hit_price = r["tp_hit_price"] if "tp_hit_price" in r.keys() else None
+            lowest_btp = r["lowest_price_before_tp1"] if "lowest_price_before_tp1" in r.keys() else None
+            lowest_price_at = r["lowest_price_at"] if "lowest_price_at" in r.keys() else None
             out.append(
                 (
                     trade,
@@ -221,6 +393,10 @@ def get_all_trades_with_stats() -> List[tuple]:
                     float(lp) if lp is not None else None,
                     str(ps),
                     float(low) if low is not None else None,
+                    str(tp_hit_at) if tp_hit_at else None,
+                    float(tp_hit_price) if tp_hit_price is not None else None,
+                    float(lowest_btp) if lowest_btp is not None else None,
+                    str(lowest_price_at) if lowest_price_at else None,
                 )
             )
         return out
@@ -239,6 +415,18 @@ def _row_to_trade(r: sqlite3.Row) -> Trade:
         take_profit_targets = tuple(normalize_take_profit_targets(json.loads(raw_targets or "[]")))
     except (TypeError, ValueError, json.JSONDecodeError):
         take_profit_targets = ()
+    raw_order = r["take_profit_targets_order"] if "take_profit_targets_order" in r.keys() else "[]"
+    try:
+        loaded = json.loads(raw_order or "[]")
+        take_profit_targets_order = tuple(round(float(x), 4) for x in loaded if x is not None)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        take_profit_targets_order = ()
+    manual = None
+    if "lowest_price_before_tp1_manual" in r.keys() and r["lowest_price_before_tp1_manual"] is not None:
+        try:
+            manual = float(r["lowest_price_before_tp1_manual"])
+        except (TypeError, ValueError):
+            manual = None
     return Trade(
         id=r["id"],
         ticker=r["ticker"],
@@ -251,6 +439,8 @@ def _row_to_trade(r: sqlite3.Row) -> Trade:
         status=r["status"],
         tracking_start_time=dt.datetime.fromisoformat(r["tracking_start_time"]),
         take_profit_targets=take_profit_targets,
+        take_profit_targets_order=take_profit_targets_order,
+        lowest_price_before_tp1_manual=manual,
     )
 
 
@@ -276,16 +466,15 @@ def get_or_create_trade_stats(trade_id: int, entry_price: float) -> TradeStats:
                 (trade_id, entry_price, entry_price, now),
             )
             conn.commit()
-            return TradeStats(trade_id=trade_id, lowest_price=entry_price, highest_price=entry_price, max_drawdown_percent=0.0, last_price=None, last_updated=dt.datetime.fromisoformat(now))
-        last_price = row["last_price"] if "last_price" in row.keys() else None
-        return TradeStats(
-            trade_id=row["trade_id"],
-            lowest_price=row["lowest_price"],
-            highest_price=row["highest_price"],
-            max_drawdown_percent=row["max_drawdown_percent"],
-            last_price=float(last_price) if last_price is not None else None,
-            last_updated=dt.datetime.fromisoformat(row["last_updated"]),
-        )
+            return TradeStats(
+                trade_id=trade_id,
+                lowest_price=entry_price,
+                highest_price=entry_price,
+                max_drawdown_percent=0.0,
+                last_price=None,
+                last_updated=dt.datetime.fromisoformat(now),
+            )
+        return _trade_stats_from_row(row)
 
 
 def update_trade_stats(
@@ -295,23 +484,55 @@ def update_trade_stats(
     max_drawdown_percent: float,
     last_price: Optional[float] = None,
     price_source: Optional[str] = None,
+    tp_hit_at: Optional[str] = None,
+    tp_hit_price: Optional[float] = None,
+    lowest_price_before_tp1: Optional[float] = None,
+    lowest_price_at: Optional[str] = None,
 ) -> None:
-    """price_source: 'live' when market open, 'last' when market closed (last available price)."""
+    """price_source: 'live' when market open, 'last' when market closed (last available price).
+
+    tp_hit_at / tp_hit_price / lowest_price_before_tp1: pass only when recording first TP touch;
+    NULLs preserve existing row values (COALESCE).
+
+    lowest_price_at: timestamp of the cycle that produced a new running low.  The SQL CASE
+    ensures it is only overwritten when excluded.lowest_price is strictly lower than the stored one.
+    """
     now = dt.datetime.utcnow().isoformat()
     src = price_source or "last"
     with _connect() as conn:
         conn.execute(
-            """INSERT INTO trade_stats (trade_id, lowest_price, highest_price, max_drawdown_percent, last_price, price_source, last_updated)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO trade_stats (trade_id, lowest_price, highest_price, max_drawdown_percent, last_price, price_source, last_updated,
+                   tp_hit_at, tp_hit_price, lowest_price_before_tp1, lowest_price_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(trade_id) DO UPDATE SET
                  lowest_price = excluded.lowest_price,
                  highest_price = excluded.highest_price,
                  max_drawdown_percent = excluded.max_drawdown_percent,
                  last_price = excluded.last_price,
                  price_source = excluded.price_source,
-                 last_updated = excluded.last_updated
+                 last_updated = excluded.last_updated,
+                 tp_hit_at = COALESCE(trade_stats.tp_hit_at, excluded.tp_hit_at),
+                 tp_hit_price = COALESCE(trade_stats.tp_hit_price, excluded.tp_hit_price),
+                 lowest_price_before_tp1 = COALESCE(trade_stats.lowest_price_before_tp1, excluded.lowest_price_before_tp1),
+                 lowest_price_at = CASE
+                     WHEN trade_stats.lowest_price_at IS NULL THEN excluded.lowest_price_at
+                     WHEN excluded.lowest_price < trade_stats.lowest_price THEN excluded.lowest_price_at
+                     ELSE trade_stats.lowest_price_at
+                 END
             """,
-            (trade_id, lowest_price, highest_price, max_drawdown_percent, last_price, src, now),
+            (
+                trade_id,
+                lowest_price,
+                highest_price,
+                max_drawdown_percent,
+                last_price,
+                src,
+                now,
+                tp_hit_at,
+                tp_hit_price,
+                lowest_price_before_tp1,
+                lowest_price_at,
+            ),
         )
         conn.commit()
 
@@ -339,11 +560,19 @@ def get_price_logs(trade_id: int) -> List[tuple]:
 
 def get_take_profit_metrics(trade: Trade) -> dict:
     if trade.id is None:
-        return compute_take_profit_metrics(trade.entry_price, trade.take_profit_targets, [])
+        return compute_take_profit_metrics(
+            trade.entry_price,
+            trade.take_profit_targets,
+            [],
+            lowest_price_before_tp1_manual=trade.lowest_price_before_tp1_manual,
+            take_profit_targets_order=trade.take_profit_targets_order or (),
+        )
     return compute_take_profit_metrics(
         trade.entry_price,
         trade.take_profit_targets,
         get_price_logs(trade.id),
+        lowest_price_before_tp1_manual=trade.lowest_price_before_tp1_manual,
+        take_profit_targets_order=trade.take_profit_targets_order or (),
     )
 
 
@@ -353,12 +582,4 @@ def get_trade_stats(trade_id: int) -> Optional[TradeStats]:
         r = cur.fetchone()
         if r is None:
             return None
-        lp = r["last_price"] if "last_price" in r.keys() else None
-        return TradeStats(
-            trade_id=r["trade_id"],
-            lowest_price=r["lowest_price"],
-            highest_price=r["highest_price"],
-            max_drawdown_percent=r["max_drawdown_percent"],
-            last_price=float(lp) if lp is not None else None,
-            last_updated=dt.datetime.fromisoformat(r["last_updated"]),
-        )
+        return _trade_stats_from_row(r)

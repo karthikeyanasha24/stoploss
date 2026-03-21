@@ -7,9 +7,12 @@ function formatCurrency(value: number | null | undefined) {
   return value != null ? `$${value.toFixed(2)}` : "—";
 }
 
-function formatTakeProfitTargets(targets: number[] | undefined) {
-  if (!targets?.length) return "No TPs in sheet";
-  return targets.map((target, i) => `TP${i + 1}: $${target.toFixed(2)}`).join(" · ");
+function formatTakeProfitTargets(targets: number[] | undefined, order?: number[] | undefined) {
+  const list = order?.length ? order : targets;
+  if (!list?.length) {
+    return "No TP levels ";
+  }
+  return list.map((target, i) => `TP${i + 1}: $${target.toFixed(2)}`).join(" · ");
 }
 
 function SkeletonCard() {
@@ -217,7 +220,10 @@ export default function TradeDetails() {
           <div className="rounded-lg border border-border bg-muted/20 p-6">
             <p className="text-sm font-medium text-muted-foreground">Targets From Sheet</p>
             <p className="mt-2 text-lg font-semibold text-foreground">
-              {formatTakeProfitTargets(data?.take_profit_targets ?? trade?.take_profit_targets)}
+              {formatTakeProfitTargets(
+                data?.take_profit_targets ?? trade?.take_profit_targets,
+                data?.take_profit_targets_order ?? trade?.take_profit_targets_order,
+              )}
             </p>
           </div>
           <div className="rounded-lg border border-border bg-muted/20 p-6">

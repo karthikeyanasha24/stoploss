@@ -4,6 +4,12 @@ data/uploaded_credentials.json
 credentials.json
 .env
 
+# Local DB and logs (don’t commit runtime data)
+data/*.db
+*.db
+logs/
+*.log
+
 # Python
 .venv/
 venv/

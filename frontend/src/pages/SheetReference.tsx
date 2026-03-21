@@ -11,8 +11,12 @@ const STATUS_BADGES: Record<SheetTradeVerbose["status"], string> = {
   futures: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
 };
 
-function formatTakeProfitTargets(targets: number[] | undefined) {
-  if (!targets?.length) return "No TPs in sheet";
+function formatTakeProfitTargets(t: SheetTradeVerbose) {
+  const targets =
+    t.take_profit_targets_order?.length ? t.take_profit_targets_order : t.take_profit_targets;
+  if (!targets?.length) {
+    return "—";
+  }
   return targets.map((target, i) => `TP${i + 1}: $${target.toFixed(2)}`).join(" · ");
 }
 
@@ -141,7 +145,7 @@ export default function SheetReference() {
                     <div className="mt-3 grid grid-cols-1 gap-3 text-sm">
                       <div className="rounded-lg bg-muted/30 p-3">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Take profits</p>
-                        <p className="mt-1 text-foreground">{formatTakeProfitTargets(t.take_profit_targets)}</p>
+                        <p className="mt-1 text-foreground">{formatTakeProfitTargets(t)}</p>
                       </div>
                       <div className="rounded-lg bg-muted/30 p-3">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Expiry</p>
@@ -192,7 +196,7 @@ export default function SheetReference() {
                           {t.entry_price != null ? `$${t.entry_price.toFixed(2)}` : "—"}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
-                          {formatTakeProfitTargets(t.take_profit_targets)}
+                          {formatTakeProfitTargets(t)}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {t.expiry_date ?? "—"}

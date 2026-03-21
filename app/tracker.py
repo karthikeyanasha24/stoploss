@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from typing import Optional
 
 from . import config
 from .api_client import MarketDataAPI
@@ -15,7 +16,7 @@ from .database import (
     update_trade_stats,
 )
 from .models import Trade
-from .utils import is_market_open, max_drawdown_percent
+from .utils import first_tp1_chronological, is_market_open, max_drawdown_percent
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,39 @@ def run_tracking(api: MarketDataAPI) -> None:
                 continue
             insert_price_log(t.id, price)
             stats = get_or_create_trade_stats(t.id, t.entry_price)
+            tp_hit_at: Optional[str] = None
+            tp_hit_price_arg: Optional[float] = None
+            lowest_btp_arg: Optional[float] = None
+            if stats.tp_hit_at is None:
+                tp1 = first_tp1_chronological(
+                    t.entry_price,
+                    t.take_profit_targets,
+                    t.take_profit_targets_order or (),
+                )
+                if tp1 is not None and price >= tp1:
+                    tp_hit_at = dt.datetime.utcnow().isoformat()
+                    tp_hit_price_arg = price
+                    # Min premium seen before this quote (trade_stats not yet updated with `price`)
+                    lowest_btp_arg = stats.lowest_price
             low = min(stats.lowest_price, price)
             high = max(stats.highest_price, price)
             dd = max_drawdown_percent(t.entry_price, low)
             price_source = "live" if market_open else "last"
-            update_trade_stats(t.id, low, high, dd, last_price=price, price_source=price_source)
+            # Record the timestamp only when this cycle sets a new low; SQL CASE keeps the
+            # stored timestamp if the price hasn't improved on the existing minimum.
+            low_at = dt.datetime.utcnow().isoformat() if price < stats.lowest_price else None
+            update_trade_stats(
+                t.id,
+                low,
+                high,
+                dd,
+                last_price=price,
+                price_source=price_source,
+                tp_hit_at=tp_hit_at,
+                tp_hit_price=tp_hit_price_arg,
+                lowest_price_before_tp1=lowest_btp_arg,
+                lowest_price_at=low_at,
+            )
             logger.info(
                 "Trade %s [%s %s %s exp=%s] | contract=%s | "
                 "PARAMS: entry_price=%.2f fetched_price=%.2f prev_lowest=%.2f prev_highest=%.2f | "

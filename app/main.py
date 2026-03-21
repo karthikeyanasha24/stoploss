@@ -20,7 +20,13 @@ from starlette.requests import Request
 
 from . import config
 from .api_client import MarketDataAPI
-from .database import init_schema, insert_trade
+from .database import init_schema, insert_trade, update_trade_sheet_fields
+from .utils import (
+    first_tp1_chronological,
+    max_drawdown_percent,
+    ordered_tp_levels_chronological,
+    per_tp_babji_metrics,
+)
 from .logger import LOG_BUFFER, configure_logging
 from .scheduler import create_scheduler
 from .sheet_loader import load_trades_from_sheet, load_all_trades_from_sheet_verbose
@@ -36,6 +42,15 @@ def sync_sheet_to_db() -> int:
     today = dt.date.today()
     for t in trades:
         tps = t.get("take_profit_targets") or []
+        if getattr(config, "SHEET_PARSE_DEBUG", False):
+            logger.info(
+                "sync: parsed TPs=%s order=%s | %s %s %s",
+                t.get("take_profit_targets"),
+                t.get("take_profit_targets_order"),
+                t.get("ticker"),
+                t.get("analyst_name"),
+                t.get("entry_price"),
+            )
         logger.info(
             "Sheet row -> ticker=%s strike=%s type=%s expiry=%s entry=%s trade_date=%s analyst=%s take_profits=%s",
             t.get("ticker"),
@@ -47,40 +62,57 @@ def sync_sheet_to_db() -> int:
             t.get("analyst_name"),
             len(tps),
         )
-        if t["expiry_date"] < today:
+        expired = t["expiry_date"] < today
+        if expired:
             logger.info(
-                "Skipping expired trade from sheet (expiry %s is before today %s): %s",
+                "Skipping insert for expired sheet row (expiry %s < today %s): %s — will still refresh TPs if row exists in DB",
                 t["expiry_date"],
                 today,
                 t.get("ticker"),
             )
-            continue
-        trade_date = t.get("trade_date")
-        entry_time = None
-        if isinstance(trade_date, dt.date):
-            # Use sheet date at midnight as entry_time so dashboard filters work by sheet date
-            entry_time = dt.datetime.combine(trade_date, dt.time.min)
-        trade_id = insert_trade(
+        else:
+            trade_date = t.get("trade_date")
+            entry_time = None
+            if isinstance(trade_date, dt.date):
+                # Use sheet date at midnight as entry_time so dashboard filters work by sheet date
+                entry_time = dt.datetime.combine(trade_date, dt.time.min)
+            trade_id = insert_trade(
+                ticker=t["ticker"],
+                strike_price=t["strike_price"],
+                option_type=t["option_type"],
+                expiry_date=t["expiry_date"],
+                entry_price=t["entry_price"],
+                analyst_name=t["analyst_name"],
+                take_profit_targets=t.get("take_profit_targets", []),
+                take_profit_targets_order=t.get("take_profit_targets_order"),
+                lowest_price_before_tp1_manual=t.get("lowest_price_before_tp1_manual"),
+                entry_time=entry_time,
+            )
+            if trade_id is not None:
+                added += 1
+                logger.info("Inserted trade into DB with id=%s for ticker=%s", trade_id, t.get("ticker"))
+            else:
+                logger.info(
+                    "Trade already exists in DB, not inserting duplicate for ticker=%s, strike=%s, expiry=%s, analyst=%s",
+                    t.get("ticker"),
+                    t.get("strike_price"),
+                    t.get("expiry_date"),
+                    t.get("analyst_name"),
+                )
+        # Always refresh sheet-derived fields so take profits stay aligned with the latest parse
+        # (not only on duplicate insert — ensures re-sync updates TPs for existing rows).
+        # Expired rows are skipped for insert above but must still be updated so TPs are not stale
+        # while the position remains ACTIVE in the DB.
+        update_trade_sheet_fields(
             ticker=t["ticker"],
             strike_price=t["strike_price"],
             option_type=t["option_type"],
             expiry_date=t["expiry_date"],
-            entry_price=t["entry_price"],
             analyst_name=t["analyst_name"],
             take_profit_targets=t.get("take_profit_targets", []),
-            entry_time=entry_time,
+            take_profit_targets_order=t.get("take_profit_targets_order"),
+            lowest_price_before_tp1_manual=t.get("lowest_price_before_tp1_manual"),
         )
-        if trade_id is not None:
-            added += 1
-            logger.info("Inserted trade into DB with id=%s for ticker=%s", trade_id, t.get("ticker"))
-        else:
-            logger.info(
-                "Trade already exists in DB, not inserting duplicate for ticker=%s, strike=%s, expiry=%s, analyst=%s",
-                t.get("ticker"),
-                t.get("strike_price"),
-                t.get("expiry_date"),
-                t.get("analyst_name"),
-            )
     return added
 
 
@@ -210,8 +242,88 @@ def create_app():
     def list_trades():
         rows = database.get_all_trades_with_stats()
         out = []
-        for t, dd, lp, ps, low in rows:
+        for t, dd, lp, ps, low, tp_hit_at_db, _tp_hit_price_db, lowest_btp_db, lowest_price_at_db in rows:
             tp_metrics = database.get_take_profit_metrics(t)
+            price_logs = database.get_price_logs(t.id) if t.id else []
+            ordered_tp_levels = ordered_tp_levels_chronological(
+                t.entry_price,
+                t.take_profit_targets,
+                t.take_profit_targets_order or (),
+            )
+            per_tp_babji = per_tp_babji_metrics(
+                t.entry_price,
+                ordered_tp_levels,
+                price_logs,
+                lowest_price_fallback=low if not price_logs else None,
+                lowest_price_at_fallback=lowest_price_at_db if not price_logs else None,
+            )
+            tp1 = first_tp1_chronological(
+                t.entry_price,
+                t.take_profit_targets,
+                t.take_profit_targets_order or (),
+            )
+            has_tp = tp1 is not None
+
+            # Babji DD % — priority matters: price_logs beat tracker DB so we don't show 0%
+            # when the first poll was already past TP1 but earlier logs captured a deeper dip.
+            #
+            #  FROZEN — TP hit (frozen MAE before TP1):
+            #    1) manual sheet column
+            #    2) price_logs path (compute_take_profit_metrics, min_before_tp1_source == price_logs)
+            #    3) tracker DB (tp_hit_at + lowest_price_before_tp1 at first quote ≥ TP1)
+            #
+            #  LIVE — TP exists, TP1 not hit: MAE vs running min (trade_stats.lowest_price).
+            #
+            #  No TP1 on sheet: Babji is N/A — "before profitability" needs a TP; use Current DD % only.
+            babji_pct = None
+            babji_low_price = None
+            babji_drawdown_source = None  # "FROZEN" | "LIVE" | "NO_TP"
+            lowest_before_tp = None
+
+            if (
+                tp_metrics.get("min_before_tp1_source") == "manual_sheet"
+                and tp_metrics["drawdown_before_take_profit_percent"] is not None
+            ):
+                babji_pct = tp_metrics["drawdown_before_take_profit_percent"]
+                babji_low_price = tp_metrics["drawdown_before_take_profit_price"]
+                lowest_before_tp = babji_low_price
+                babji_drawdown_source = "FROZEN"
+            elif (
+                tp_metrics.get("min_before_tp1_source") == "price_logs"
+                and tp_metrics["take_profit_hit_at"] is not None
+                and tp_metrics["drawdown_before_take_profit_percent"] is not None
+            ):
+                babji_pct = tp_metrics["drawdown_before_take_profit_percent"]
+                babji_low_price = tp_metrics["drawdown_before_take_profit_price"]
+                lowest_before_tp = babji_low_price
+                babji_drawdown_source = "FROZEN"
+            elif tp_hit_at_db is not None and lowest_btp_db is not None:
+                babji_pct = round(max_drawdown_percent(t.entry_price, lowest_btp_db), 2)
+                babji_low_price = lowest_btp_db
+                lowest_before_tp = lowest_btp_db
+                babji_drawdown_source = "FROZEN"
+            elif has_tp:
+                if low is not None and t.entry_price > 0:
+                    babji_pct = round(max_drawdown_percent(t.entry_price, low), 2)
+                    babji_low_price = low
+                    babji_drawdown_source = "LIVE"
+            # else: no TP1 — leave babji_* null (not applicable)
+
+            # No intraday dip before TP1 in stored data (e.g. first quote already ≥ TP1).
+            babji_no_pretp_history = (
+                babji_drawdown_source == "FROZEN"
+                and tp_metrics.get("min_before_tp1_source") != "manual_sheet"
+                and babji_low_price is not None
+                and t.entry_price > 0
+                and abs(babji_low_price - t.entry_price) < 0.001
+                and babji_pct is not None
+                and babji_pct == 0.0
+            )
+            if babji_no_pretp_history:
+                babji_drawdown_source = "LIMITED"
+
+            tp_hit_flag = babji_drawdown_source in ("FROZEN", "LIMITED")
+
             out.append(
                 {
                     "id": t.id,
@@ -224,17 +336,34 @@ def create_app():
                     "analyst_name": t.analyst_name,
                     "status": t.status,
                     "take_profit_targets": list(t.take_profit_targets),
+                    "take_profit_targets_order": list(t.take_profit_targets_order),
+                    "lowest_price_before_tp1_manual": t.lowest_price_before_tp1_manual,
                     "take_profit_target_price": tp_metrics["take_profit_target_price"],
-                    "take_profit_hit_at": tp_metrics["take_profit_hit_at"],
+                    "tp1_upside_percent": tp_metrics["tp1_upside_percent"],
+                    # Best available TP-hit timestamp: tracker DB first, then price-log scan
+                    "take_profit_hit_at": tp_hit_at_db or tp_metrics["take_profit_hit_at"],
                     "take_profit_hit_price": tp_metrics["take_profit_hit_price"],
                     "drawdown_before_take_profit_price": tp_metrics["drawdown_before_take_profit_price"],
                     "drawdown_before_take_profit_percent": tp_metrics["drawdown_before_take_profit_percent"],
+                    "drawdown_before_tp1_percent_signed": tp_metrics["drawdown_before_tp1_percent_signed"],
+                    "min_before_tp1_source": tp_metrics["min_before_tp1_source"],
                     # Lowest price seen after entry (client-facing live drawdown value)
                     "drawdown_price": low,
                     # Overall max drawdown since entry
                     "max_drawdown_percent": dd,
                     "current_price": lp,
                     "current_price_source": ps,
+                    "tp_hit_flag": tp_hit_flag,
+                    "lowest_price_before_tp": lowest_before_tp,
+                    "babji_low_price": babji_low_price,
+                    "babji_drawdown_source": babji_drawdown_source,
+                    "babji_drawdown_percent": babji_pct,
+                    "babji_no_pretp_history": babji_no_pretp_history,
+                    # When the running lowest price was last set (from tracker cycles)
+                    "lowest_price_at": lowest_price_at_db,
+                    "current_drawdown_percent": dd,
+                    # Per TP (sheet order): min premium in window entry → first touch of that TP; dates from price_logs
+                    "per_tp_babji": per_tp_babji,
                 }
             )
         return out
@@ -255,6 +384,8 @@ def create_app():
             "ticker": trade.ticker,
             "entry_price": trade.entry_price,
             "take_profit_targets": list(trade.take_profit_targets),
+            "take_profit_targets_order": list(trade.take_profit_targets_order),
+            "lowest_price_before_tp1_manual": trade.lowest_price_before_tp1_manual,
         }
         if stats:
             out["stats"] = {
@@ -263,10 +394,13 @@ def create_app():
                 "max_drawdown_percent": stats.max_drawdown_percent,
                 "current_price": stats.last_price,
                 "take_profit_target_price": tp_metrics["take_profit_target_price"],
+                "tp1_upside_percent": tp_metrics["tp1_upside_percent"],
                 "take_profit_hit_at": tp_metrics["take_profit_hit_at"],
                 "take_profit_hit_price": tp_metrics["take_profit_hit_price"],
                 "drawdown_before_take_profit_price": tp_metrics["drawdown_before_take_profit_price"],
                 "drawdown_before_take_profit_percent": tp_metrics["drawdown_before_take_profit_percent"],
+                "drawdown_before_tp1_percent_signed": tp_metrics["drawdown_before_tp1_percent_signed"],
+                "min_before_tp1_source": tp_metrics["min_before_tp1_source"],
             }
         else:
             out["stats"] = None
@@ -309,7 +443,8 @@ def create_app():
         from . import config as _cfg
         from .sheet_loader import (
             _get_client, _header_looks_like_trade_row, _column_index,
-            _find_exit_column_index, _normalize_sheet_rows, _is_anchor_row,
+            _find_exit_column_index, _find_lowest_before_tp_column_index, _normalize_sheet_rows,
+            _is_anchor_row,
             _row_cell, _extract_exit_prices_from_cell, _clean_currency,
             _parse_ticker_strike, _collect_exit_prices_multi_row, _parse_date,
         )
@@ -354,9 +489,19 @@ def create_app():
             col_date = _column_index(headers, ["date"])
             col_ticker = _column_index(headers, ["ticker", "ticker/strike", "strike"])
             col_entry = _column_index(headers, ["entry"])
-            col_exit = _find_exit_column_index(headers, col_entry)
+            col_exit = _find_exit_column_index(
+                headers,
+                col_entry,
+                sample_rows=rows,
+                header_idx=header_idx,
+                col_ticker=col_ticker,
+                col_date=col_date,
+            )
 
-            rows_norm = _normalize_sheet_rows(rows, headers, col_date, col_ticker, col_entry, col_exit)
+            col_min_bt = _find_lowest_before_tp_column_index(headers)
+            rows_norm = _normalize_sheet_rows(
+                rows, headers, col_date, col_ticker, col_entry, col_exit, col_min_bt
+            )
 
             trades_found = []
             i = header_idx + 1
@@ -382,8 +527,16 @@ def create_app():
                         break
                     exit_cells.append(_row_cell(r2, col_exit))
                     j += 1
-                tps = _collect_exit_prices_multi_row(
-                    rows_norm, i, col_ticker, col_entry, col_exit, header_idx, col_date
+                t_sorted, t_order = _collect_exit_prices_multi_row(
+                    rows_norm,
+                    i,
+                    col_ticker,
+                    col_entry,
+                    col_exit,
+                    header_idx,
+                    col_date,
+                    entry_price=float(entry_price),
+                    col_min_before_tp1=col_min_bt,
                 )
                 trades_found.append({
                     "row": i,
@@ -391,7 +544,8 @@ def create_app():
                     "entry_price": entry_price,
                     "exit_column_index": col_exit,
                     "exit_cells_raw": exit_cells,
-                    "take_profit_targets": tps,
+                    "take_profit_targets": t_sorted,
+                    "take_profit_targets_order": t_order,
                 })
                 i += 1
 
@@ -404,6 +558,7 @@ def create_app():
                 "col_ticker": col_ticker,
                 "col_entry": col_entry,
                 "col_exit": col_exit,
+                "col_min_before_tp1": col_min_bt,
                 "trades_parsed": len(trades_found),
                 "trades": trades_found,
             })
@@ -421,22 +576,11 @@ def main() -> None:
     has_api_key = bool(config.API_KEY) or config.MOCK_API
 
     def _run_uvicorn():
-        import socket
         import uvicorn
-        base_port = int(os.getenv("PORT", "8000"))
-        for offset in range(10):
-            port = base_port + offset
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.bind(("", port))
-            except OSError:
-                continue
-            logger.info("Starting server on http://0.0.0.0:%s", port)
-            app = create_app()
-            uvicorn.run(app, host="0.0.0.0", port=port)
-            return
-        logger.error("Could not bind to port %s-%s. Stop other instances: taskkill /PID <pid> /F", base_port, base_port + 9)
-        sys.exit(1)
+        port = int(os.getenv("PORT", "8000"))
+        logger.info("Starting server on http://0.0.0.0:%s", port)
+        app = create_app()
+        uvicorn.run(app, host="0.0.0.0", port=port)
 
     # Setup mode: serve dashboard only when no API key (user can configure)
     if api_serve and not has_api_key:
