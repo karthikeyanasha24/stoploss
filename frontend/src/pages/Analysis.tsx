@@ -51,7 +51,7 @@ export default function Analysis() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Stop-Loss Analysis</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Recommended stop levels based on historical drawdown
+          Recommended stop levels based on drawdown from alert until the first take-profit hit
         </p>
       </div>
 
@@ -79,9 +79,14 @@ export default function Analysis() {
               )}
               {data.total_trades_analyzed != null && (
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Based on {data.total_trades_analyzed} trade{data.total_trades_analyzed === 1 ? "" : "s"} with ≥{data.analysis_days ?? 7} days of tracking
+                  Based on {data.total_trades_analyzed} trade{data.total_trades_analyzed === 1 ? "" : "s"} that hit a take-profit target after ≥{data.analysis_days ?? 7} days of tracking
                 </p>
               )}
+              {(data.skipped_without_take_profit || data.skipped_without_take_profit_hit) ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Skipped {data.skipped_without_take_profit ?? 0} trade{data.skipped_without_take_profit === 1 ? "" : "s"} with no take-profit target and {data.skipped_without_take_profit_hit ?? 0} trade{data.skipped_without_take_profit_hit === 1 ? "" : "s"} that have not hit their first take-profit yet.
+                </p>
+              ) : null}
             </div>
           ) : (
             <div>

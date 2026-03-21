@@ -3,12 +3,10 @@ After N days: simulate stop levels [15,20,25,30,35,40], compute hit rates, sugge
 """
 from __future__ import annotations
 
-import datetime as dt
 import logging
-from typing import List
 
 from . import config
-from .database import get_trade_stats, get_trades_for_analysis
+from .database import get_take_profit_metrics, get_trades_for_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +18,8 @@ def would_stop_have_triggered(max_drawdown_percent: float, stop_percent: float) 
 
 def run_analysis() -> dict:
     """
-    Get trades tracked >= ANALYSIS_DAYS, for each get max_drawdown_percent,
-    simulate each stop %, aggregate hit rates, suggest best.
+    Get trades tracked >= ANALYSIS_DAYS, and for trades that reached their first
+    take-profit target, simulate which stop % would have been hit before that TP.
     """
     trades = get_trades_for_analysis(config.ANALYSIS_DAYS)
     if not trades:
@@ -34,14 +32,34 @@ def run_analysis() -> dict:
     stops = config.STOP_PERCENTAGES
     hit_counts = {s: 0 for s in stops}
     total = 0
+    skipped_without_take_profit = 0
+    skipped_without_take_profit_hit = 0
     for t in trades:
-        stats = get_trade_stats(t.id)
-        if stats is None:
+        tp_metrics = get_take_profit_metrics(t)
+        tp_target = tp_metrics["take_profit_target_price"]
+        drawdown_to_tp = tp_metrics["drawdown_before_take_profit_percent"]
+        if tp_target is None:
+            skipped_without_take_profit += 1
+            continue
+        if drawdown_to_tp is None:
+            skipped_without_take_profit_hit += 1
             continue
         total += 1
         for s in stops:
-            if would_stop_have_triggered(stats.max_drawdown_percent, s):
+            if would_stop_have_triggered(drawdown_to_tp, s):
                 hit_counts[s] += 1
+
+    if total == 0:
+        return {
+            "message": "No tracked trades have reached a take-profit target yet.",
+            "analysis_days": config.ANALYSIS_DAYS,
+            "total_trades_analyzed": 0,
+            "trades_with_take_profit_hits": 0,
+            "skipped_without_take_profit": skipped_without_take_profit,
+            "skipped_without_take_profit_hit": skipped_without_take_profit_hit,
+            "stop_results": [],
+            "recommended_stop": None,
+        }
 
     stop_results = []
     for s in stops:
@@ -58,7 +76,10 @@ def run_analysis() -> dict:
     return {
         "analysis_days": config.ANALYSIS_DAYS,
         "total_trades_analyzed": total,
+        "trades_with_take_profit_hits": total,
+        "skipped_without_take_profit": skipped_without_take_profit,
+        "skipped_without_take_profit_hit": skipped_without_take_profit_hit,
         "stop_results": stop_results,
         "recommended_stop": recommended,
-        "summary": f"Recommended Stop: {recommended}%. Balanced stop-out rate and capital preservation.",
+        "summary": f"Recommended Stop: {recommended}%. Based on drawdown from alert until the first take-profit hit.",
     }

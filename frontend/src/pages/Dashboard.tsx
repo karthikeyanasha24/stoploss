@@ -10,6 +10,7 @@ type SortKey =
   | "option_type"
   | "expiry_date"
   | "entry_price"
+  | "take_profit_target_price"
   | "drawdown_price"
   | "current_price"
   | "analyst_name"
@@ -25,6 +26,11 @@ function formatCurrency(value: number | null | undefined) {
 
 function formatEntryDate(value: string | undefined) {
   return value ? new Date(value).toLocaleDateString() : "—";
+}
+
+function formatTakeProfitTargets(targets: number[] | undefined) {
+  if (!targets?.length) return "No TPs in sheet";
+  return targets.map((target, i) => `TP${i + 1}: $${target.toFixed(2)}`).join(" · ");
 }
 
 function SkeletonCard() {
@@ -50,6 +56,9 @@ function SkeletonRow() {
 
 function MobileTradeCard({ trade }: { trade: Trade }) {
   const hasDrawdownData = trade.drawdown_price != null;
+  const takeProfitDrawdownPrice = trade.drawdown_before_take_profit_price;
+  const takeProfitDrawdownPercent = trade.drawdown_before_take_profit_percent;
+  const drawdownLabel = takeProfitDrawdownPercent != null ? "DD to 1st TP" : "Live drawdown";
 
   return (
     <div
@@ -96,6 +105,10 @@ function MobileTradeCard({ trade }: { trade: Trade }) {
           <p className="mt-1 font-medium text-foreground">{formatCurrency(trade.entry_price)}</p>
         </div>
         <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Take profits</p>
+          <p className="mt-1 font-medium text-foreground">{formatTakeProfitTargets(trade.take_profit_targets)}</p>
+        </div>
+        <div className="rounded-lg bg-muted/30 p-3">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Current</p>
           <p className="mt-1 font-medium text-foreground">
             {trade.current_price_source === "last" && trade.current_price != null
@@ -104,15 +117,23 @@ function MobileTradeCard({ trade }: { trade: Trade }) {
           </p>
         </div>
         <div className="rounded-lg bg-muted/30 p-3">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Drawdown</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">{drawdownLabel}</p>
           <p className="mt-1 font-medium text-danger">
-            {hasDrawdownData ? formatCurrency(trade.drawdown_price) : "No data"}
+            {takeProfitDrawdownPrice != null
+              ? formatCurrency(takeProfitDrawdownPrice)
+              : hasDrawdownData
+                ? formatCurrency(trade.drawdown_price)
+                : "No data"}
           </p>
         </div>
         <div className="rounded-lg bg-muted/30 p-3">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Drawdown %</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">{drawdownLabel} %</p>
           <p className="mt-1 font-medium text-danger">
-            {trade.max_drawdown_percent != null ? `${trade.max_drawdown_percent.toFixed(1)}%` : "No data"}
+            {takeProfitDrawdownPercent != null
+              ? `${takeProfitDrawdownPercent.toFixed(1)}%`
+              : trade.max_drawdown_percent != null
+                ? `${trade.max_drawdown_percent.toFixed(1)}%`
+                : "No data"}
           </p>
         </div>
       </div>
@@ -246,7 +267,11 @@ export default function Dashboard() {
     arr.sort((a, b) => {
       const aVal = a[sortKey];
       const bVal = b[sortKey];
-      if (sortKey === "max_drawdown_percent" || sortKey === "current_price") {
+      if (
+        sortKey === "max_drawdown_percent"
+        || sortKey === "current_price"
+        || sortKey === "take_profit_target_price"
+      ) {
         const aNum = aVal != null ? Number(aVal) : -1;
         const bNum = bVal != null ? Number(bVal) : -1;
         return sortDir === "asc" ? aNum - bNum : bNum - aNum;
@@ -364,7 +389,7 @@ export default function Dashboard() {
                   {" "}
                   —{" "}
                   <span className="text-amber-600 dark:text-amber-400">
-                    Rows highlighted in amber have no price data yet
+                    Rows highlighted in amber have no price data yet. If a trade has hit a take-profit, drawdown reflects the entry-to-TP window.
                   </span>
                 </>
               )}
@@ -535,6 +560,7 @@ export default function Dashboard() {
                     ["option_type", "Type"],
                     ["expiry_date", "Expiry"],
                     ["entry_price", "Entry"],
+                    ["take_profit_target_price", "Take Profits"],
                     ["current_price", "Current Price"],
                     ["drawdown_price", "Drawdown"],
                     ["max_drawdown_percent", "Drawdown %"],
@@ -597,6 +623,7 @@ export default function Dashboard() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.expiry_date}</td>
                       <td className="px-4 py-3 text-foreground">{formatCurrency(t.entry_price)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{formatTakeProfitTargets(t.take_profit_targets)}</td>
                       <td className="px-4 py-3" title={t.current_price_source === "last" ? "Last price (not live) — compare with your broker" : "Live price — compare with your broker"}>
                         {t.current_price != null ? (
                           t.current_price_source === "live" ? (
@@ -609,7 +636,11 @@ export default function Dashboard() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {hasDrawdownData ? (
+                        {t.drawdown_before_take_profit_price != null ? (
+                          <span className="font-medium text-danger">
+                            {formatCurrency(t.drawdown_before_take_profit_price)}
+                          </span>
+                        ) : hasDrawdownData ? (
                           <span className="font-medium text-danger">
                             {formatCurrency(dd)}
                           </span>
@@ -620,7 +651,11 @@ export default function Dashboard() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {t.max_drawdown_percent != null ? (
+                        {t.drawdown_before_take_profit_percent != null ? (
+                          <span className="font-medium text-danger">
+                            {t.drawdown_before_take_profit_percent.toFixed(1)}%
+                          </span>
+                        ) : t.max_drawdown_percent != null ? (
                           <span className={t.max_drawdown_percent > 0 ? "font-medium text-danger" : "text-muted-foreground"}>
                             {t.max_drawdown_percent.toFixed(1)}%
                           </span>

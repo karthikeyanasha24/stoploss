@@ -11,6 +11,12 @@ export type Trade = {
   entry_price: number;
   analyst_name: string;
   status: string;
+  take_profit_targets?: number[];
+  take_profit_target_price?: number | null;
+  take_profit_hit_at?: string | null;
+  take_profit_hit_price?: number | null;
+  drawdown_before_take_profit_price?: number | null;
+  drawdown_before_take_profit_percent?: number | null;
   /** Lowest price seen after entry; null if no price data yet */
   drawdown_price?: number | null;
   /** Max drawdown % from tracking; null if no price data yet (used for analysis, not main dashboard display) */
@@ -25,10 +31,17 @@ export type TradeStats = {
   trade_id: number;
   ticker: string;
   entry_price: number;
+  take_profit_targets?: number[];
   stats: {
     lowest_price: number;
     highest_price: number;
     max_drawdown_percent: number;
+    current_price?: number | null;
+    take_profit_target_price?: number | null;
+    take_profit_hit_at?: string | null;
+    take_profit_hit_price?: number | null;
+    drawdown_before_take_profit_price?: number | null;
+    drawdown_before_take_profit_percent?: number | null;
   } | null;
 };
 
@@ -42,6 +55,9 @@ export type StopResult = {
 export type Analysis = {
   analysis_days?: number;
   total_trades_analyzed?: number;
+  trades_with_take_profit_hits?: number;
+  skipped_without_take_profit?: number;
+  skipped_without_take_profit_hit?: number;
   stop_results: StopResult[];
   recommended_stop: number | null;
   summary?: string;
@@ -79,6 +95,7 @@ export type SheetTradeVerbose = {
   option_type: string | null;
   expiry_date: string | null;
   entry_price: number | null;
+  take_profit_targets?: number[];
   status: "on_dashboard" | "expired" | "no_expiry" | "parse_failed" | "invalid_entry" | "futures";
   reason: string;
 };

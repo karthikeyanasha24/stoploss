@@ -4,12 +4,14 @@ SQLite database: trades, price_logs, trade_stats.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sqlite3
 from pathlib import Path
 from typing import List, Optional
 
 from . import config
 from .models import Trade, TradeStats
+from .utils import compute_take_profit_metrics, normalize_take_profit_targets
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -33,6 +35,7 @@ def init_schema(conn: Optional[sqlite3.Connection] = None) -> None:
                 option_type TEXT NOT NULL,
                 expiry_date TEXT NOT NULL,
                 entry_price REAL NOT NULL,
+                take_profit_targets TEXT NOT NULL DEFAULT '[]',
                 entry_time TEXT NOT NULL,
                 analyst_name TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'ACTIVE',
@@ -57,6 +60,12 @@ def init_schema(conn: Optional[sqlite3.Connection] = None) -> None:
             CREATE INDEX IF NOT EXISTS ix_price_logs_trade_id ON price_logs(trade_id);
             CREATE INDEX IF NOT EXISTS ix_price_logs_timestamp ON price_logs(timestamp);
         """)
+        # Migration: add last_price to trade_stats if missing (existing DBs)
+        try:
+            conn.execute("ALTER TABLE trades ADD COLUMN take_profit_targets TEXT NOT NULL DEFAULT '[]'")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
         # Migration: add last_price to trade_stats if missing (existing DBs)
         try:
             conn.execute("ALTER TABLE trade_stats ADD COLUMN last_price REAL")
@@ -99,18 +108,20 @@ def insert_trade(
     expiry_date: dt.date,
     entry_price: float,
     analyst_name: str,
+    take_profit_targets: Optional[list[float]] = None,
     entry_time: Optional[dt.datetime] = None,
 ) -> Optional[int]:
     """Returns trade id or None if duplicate."""
     entry_time = entry_time or dt.datetime.utcnow()
     tracking_start = dt.datetime.utcnow()
+    take_profit_targets_json = json.dumps(normalize_take_profit_targets(take_profit_targets or []))
     try:
         with _connect() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO trades (ticker, strike_price, option_type, expiry_date, entry_price,
-                    entry_time, analyst_name, status, tracking_start_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+                    take_profit_targets, entry_time, analyst_name, status, tracking_start_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
                 """,
                 (
                     ticker,
@@ -118,6 +129,7 @@ def insert_trade(
                     option_type,
                     expiry_date.isoformat(),
                     entry_price,
+                    take_profit_targets_json,
                     entry_time.isoformat(),
                     analyst_name,
                     tracking_start.isoformat(),
@@ -126,7 +138,50 @@ def insert_trade(
             conn.commit()
             return cur.lastrowid
     except sqlite3.IntegrityError:
+        update_trade_take_profit_targets(
+            ticker=ticker,
+            strike_price=strike_price,
+            option_type=option_type,
+            expiry_date=expiry_date,
+            analyst_name=analyst_name,
+            take_profit_targets=take_profit_targets or [],
+        )
+        logger.info(
+            "Duplicate trade — refreshed take_profit_targets (%d levels) for %s %s %s",
+            len(normalize_take_profit_targets(take_profit_targets or [])),
+            ticker,
+            strike_price,
+            expiry_date.isoformat(),
+        )
         return None
+
+
+def update_trade_take_profit_targets(
+    ticker: str,
+    strike_price: float,
+    option_type: str,
+    expiry_date: dt.date,
+    analyst_name: str,
+    take_profit_targets: list[float],
+) -> None:
+    targets_json = json.dumps(normalize_take_profit_targets(take_profit_targets))
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE trades
+            SET take_profit_targets = ?
+            WHERE ticker = ? AND strike_price = ? AND option_type = ? AND expiry_date = ? AND analyst_name = ?
+            """,
+            (
+                targets_json,
+                ticker,
+                strike_price,
+                option_type,
+                expiry_date.isoformat(),
+                analyst_name,
+            ),
+        )
+        conn.commit()
 
 
 def get_active_trades() -> List[Trade]:
@@ -179,6 +234,11 @@ def get_trade_by_id(trade_id: int) -> Optional[Trade]:
 
 
 def _row_to_trade(r: sqlite3.Row) -> Trade:
+    raw_targets = r["take_profit_targets"] if "take_profit_targets" in r.keys() else "[]"
+    try:
+        take_profit_targets = tuple(normalize_take_profit_targets(json.loads(raw_targets or "[]")))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        take_profit_targets = ()
     return Trade(
         id=r["id"],
         ticker=r["ticker"],
@@ -190,6 +250,7 @@ def _row_to_trade(r: sqlite3.Row) -> Trade:
         analyst_name=r["analyst_name"],
         status=r["status"],
         tracking_start_time=dt.datetime.fromisoformat(r["tracking_start_time"]),
+        take_profit_targets=take_profit_targets,
     )
 
 
@@ -274,6 +335,16 @@ def get_price_logs(trade_id: int) -> List[tuple]:
             (trade_id,),
         )
         return [(r["timestamp"], r["price"]) for r in cur.fetchall()]
+
+
+def get_take_profit_metrics(trade: Trade) -> dict:
+    if trade.id is None:
+        return compute_take_profit_metrics(trade.entry_price, trade.take_profit_targets, [])
+    return compute_take_profit_metrics(
+        trade.entry_price,
+        trade.take_profit_targets,
+        get_price_logs(trade.id),
+    )
 
 
 def get_trade_stats(trade_id: int) -> Optional[TradeStats]:

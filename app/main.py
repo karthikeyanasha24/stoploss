@@ -35,8 +35,9 @@ def sync_sheet_to_db() -> int:
     added = 0
     today = dt.date.today()
     for t in trades:
+        tps = t.get("take_profit_targets") or []
         logger.info(
-            "Sheet row -> ticker=%s strike=%s type=%s expiry=%s entry=%s trade_date=%s analyst=%s",
+            "Sheet row -> ticker=%s strike=%s type=%s expiry=%s entry=%s trade_date=%s analyst=%s take_profits=%s",
             t.get("ticker"),
             t.get("strike_price"),
             t.get("option_type"),
@@ -44,6 +45,7 @@ def sync_sheet_to_db() -> int:
             t.get("entry_price"),
             t.get("trade_date"),
             t.get("analyst_name"),
+            len(tps),
         )
         if t["expiry_date"] < today:
             logger.info(
@@ -65,6 +67,7 @@ def sync_sheet_to_db() -> int:
             expiry_date=t["expiry_date"],
             entry_price=t["entry_price"],
             analyst_name=t["analyst_name"],
+            take_profit_targets=t.get("take_profit_targets", []),
             entry_time=entry_time,
         )
         if trade_id is not None:
@@ -206,26 +209,35 @@ def create_app():
     @app.get("/api/trades")
     def list_trades():
         rows = database.get_all_trades_with_stats()
-        return [
-            {
-                "id": t.id,
-                "ticker": t.ticker,
-                "strike_price": t.strike_price,
-                "option_type": t.option_type,
-                "expiry_date": t.expiry_date.isoformat(),
-                "entry_time": t.entry_time.isoformat(),
-                "entry_price": t.entry_price,
-                "analyst_name": t.analyst_name,
-                "status": t.status,
-                # Lowest price seen after entry (client-facing "drawdown" value)
-                "drawdown_price": low,
-                # Keep percent for analysis APIs and any future use
-                "max_drawdown_percent": dd,
-                "current_price": lp,
-                "current_price_source": ps,
-            }
-            for t, dd, lp, ps, low in rows
-        ]
+        out = []
+        for t, dd, lp, ps, low in rows:
+            tp_metrics = database.get_take_profit_metrics(t)
+            out.append(
+                {
+                    "id": t.id,
+                    "ticker": t.ticker,
+                    "strike_price": t.strike_price,
+                    "option_type": t.option_type,
+                    "expiry_date": t.expiry_date.isoformat(),
+                    "entry_time": t.entry_time.isoformat(),
+                    "entry_price": t.entry_price,
+                    "analyst_name": t.analyst_name,
+                    "status": t.status,
+                    "take_profit_targets": list(t.take_profit_targets),
+                    "take_profit_target_price": tp_metrics["take_profit_target_price"],
+                    "take_profit_hit_at": tp_metrics["take_profit_hit_at"],
+                    "take_profit_hit_price": tp_metrics["take_profit_hit_price"],
+                    "drawdown_before_take_profit_price": tp_metrics["drawdown_before_take_profit_price"],
+                    "drawdown_before_take_profit_percent": tp_metrics["drawdown_before_take_profit_percent"],
+                    # Lowest price seen after entry (client-facing live drawdown value)
+                    "drawdown_price": low,
+                    # Overall max drawdown since entry
+                    "max_drawdown_percent": dd,
+                    "current_price": lp,
+                    "current_price_source": ps,
+                }
+            )
+        return out
 
     @app.get("/api/analysis")
     def get_analysis():
@@ -237,13 +249,24 @@ def create_app():
         if not trade:
             raise HTTPException(404, "Trade not found")
         stats = database.get_trade_stats(trade_id)
-        out = {"trade_id": trade_id, "ticker": trade.ticker, "entry_price": trade.entry_price}
+        tp_metrics = database.get_take_profit_metrics(trade)
+        out = {
+            "trade_id": trade_id,
+            "ticker": trade.ticker,
+            "entry_price": trade.entry_price,
+            "take_profit_targets": list(trade.take_profit_targets),
+        }
         if stats:
             out["stats"] = {
                 "lowest_price": stats.lowest_price,
                 "highest_price": stats.highest_price,
                 "max_drawdown_percent": stats.max_drawdown_percent,
                 "current_price": stats.last_price,
+                "take_profit_target_price": tp_metrics["take_profit_target_price"],
+                "take_profit_hit_at": tp_metrics["take_profit_hit_at"],
+                "take_profit_hit_price": tp_metrics["take_profit_hit_price"],
+                "drawdown_before_take_profit_price": tp_metrics["drawdown_before_take_profit_price"],
+                "drawdown_before_take_profit_percent": tp_metrics["drawdown_before_take_profit_percent"],
             }
         else:
             out["stats"] = None
@@ -273,6 +296,119 @@ def create_app():
         except Exception as e:
             logger.exception("Sync failed: %s", e)
             return {"ok": False, "error": str(e), "added": 0}
+
+    @app.get("/api/debug/sheet-parse")
+    def debug_sheet_parse():
+        """
+        Diagnostic endpoint: shows raw column detection and take profit parsing
+        for each worksheet tab. Visit this URL to see exactly what the parser finds.
+        """
+        import gspread
+        from google.oauth2.service_account import Credentials
+        from pathlib import Path as _Path
+        from . import config as _cfg
+        from .sheet_loader import (
+            _get_client, _header_looks_like_trade_row, _column_index,
+            _find_exit_column_index, _normalize_sheet_rows, _is_anchor_row,
+            _row_cell, _extract_exit_prices_from_cell, _clean_currency,
+            _parse_ticker_strike, _collect_exit_prices_multi_row, _parse_date,
+        )
+
+        if not _cfg.SPREADSHEET_ID:
+            return {"error": "SPREADSHEET_ID not set"}
+
+        try:
+            client = _get_client()
+            workbook = client.open_by_key(_cfg.SPREADSHEET_ID)
+        except Exception as e:
+            return {"error": str(e)}
+
+        sheets_out = []
+        for ws in workbook.worksheets():
+            try:
+                rows = ws.get_all_values()
+            except Exception as e:
+                sheets_out.append({"sheet": ws.title, "error": str(e)})
+                continue
+
+            if not rows:
+                sheets_out.append({"sheet": ws.title, "rows": 0, "header_found": False})
+                continue
+
+            header_idx = None
+            for i, row in enumerate(rows[:15]):
+                if _header_looks_like_trade_row(row):
+                    header_idx = i
+                    break
+
+            if header_idx is None:
+                sheets_out.append({
+                    "sheet": ws.title,
+                    "total_rows": len(rows),
+                    "header_found": False,
+                    "first_3_rows": [list(r) for r in rows[:3]],
+                })
+                continue
+
+            headers = rows[header_idx]
+            col_date = _column_index(headers, ["date"])
+            col_ticker = _column_index(headers, ["ticker", "ticker/strike", "strike"])
+            col_entry = _column_index(headers, ["entry"])
+            col_exit = _find_exit_column_index(headers, col_entry)
+
+            rows_norm = _normalize_sheet_rows(rows, headers, col_date, col_ticker, col_entry, col_exit)
+
+            trades_found = []
+            i = header_idx + 1
+            while i < len(rows_norm):
+                row = rows_norm[i]
+                if col_ticker is None or col_entry is None:
+                    break
+                if not _is_anchor_row(row, col_ticker, col_entry, col_date):
+                    i += 1
+                    continue
+                entry_price = _clean_currency(_row_cell(row, col_entry))
+                if entry_price is None or entry_price <= 0:
+                    i += 1
+                    continue
+                ticker_raw = _row_cell(row, col_ticker)
+                # Collect exit cell values for this trade (anchor + rows below)
+                exit_cells = []
+                exit_cells.append(_row_cell(rows_norm[i], col_exit))
+                j = i + 1
+                while j < len(rows_norm):
+                    r2 = rows_norm[j]
+                    if _is_anchor_row(r2, col_ticker, col_entry, col_date):
+                        break
+                    exit_cells.append(_row_cell(r2, col_exit))
+                    j += 1
+                tps = _collect_exit_prices_multi_row(
+                    rows_norm, i, col_ticker, col_entry, col_exit, header_idx, col_date
+                )
+                trades_found.append({
+                    "row": i,
+                    "ticker_raw": ticker_raw,
+                    "entry_price": entry_price,
+                    "exit_column_index": col_exit,
+                    "exit_cells_raw": exit_cells,
+                    "take_profit_targets": tps,
+                })
+                i += 1
+
+            sheets_out.append({
+                "sheet": ws.title,
+                "total_rows": len(rows),
+                "header_row_index": header_idx,
+                "header_row": list(headers),
+                "col_date": col_date,
+                "col_ticker": col_ticker,
+                "col_entry": col_entry,
+                "col_exit": col_exit,
+                "trades_parsed": len(trades_found),
+                "trades": trades_found,
+            })
+
+        return {"sheets": sheets_out}
 
     return app
 

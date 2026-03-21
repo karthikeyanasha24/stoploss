@@ -3,6 +3,15 @@ import { useParams, Link } from "react-router-dom";
 import { fetchStats, fetchTrades } from "../lib/api";
 import type { TradeStats, Trade } from "../lib/api";
 
+function formatCurrency(value: number | null | undefined) {
+  return value != null ? `$${value.toFixed(2)}` : "—";
+}
+
+function formatTakeProfitTargets(targets: number[] | undefined) {
+  if (!targets?.length) return "No TPs in sheet";
+  return targets.map((target, i) => `TP${i + 1}: $${target.toFixed(2)}`).join(" · ");
+}
+
 function SkeletonCard() {
   return (
     <div className="rounded-xl border border-border bg-card p-6 animate-pulse">
@@ -150,7 +159,7 @@ export default function TradeDetails() {
         <div className="border-b border-border px-4 py-4 sm:px-6">
           <h2 className="text-lg font-semibold text-foreground">Price Movement Stats</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Lowest, highest, and max drawdown since entry
+            Overall price stats plus drawdown from alert until the first take-profit hit
           </p>
         </div>
         <div className="p-4 sm:p-6">
@@ -161,7 +170,7 @@ export default function TradeDetails() {
               <SkeletonCard />
             </div>
           ) : stats ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-lg border border-border bg-muted/20 p-6">
                 <p className="text-sm font-medium text-muted-foreground">Lowest Price</p>
                 <p className="mt-2 text-2xl font-semibold text-foreground">
@@ -175,17 +184,60 @@ export default function TradeDetails() {
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-6">
-                <p className="text-sm font-medium text-muted-foreground">Max Drawdown</p>
+                <p className="text-sm font-medium text-muted-foreground">Max Drawdown Since Entry</p>
                 <p className={`mt-2 text-2xl font-semibold ${stats.max_drawdown_percent >= 0 ? "text-danger" : "text-success"}`}>
                   {stats.max_drawdown_percent >= 0
                     ? `${stats.max_drawdown_percent.toFixed(1)}%`
                     : `${stats.max_drawdown_percent.toFixed(1)}%`}
                 </p>
               </div>
+              <div className="rounded-lg border border-border bg-muted/20 p-6">
+                <p className="text-sm font-medium text-muted-foreground">Drawdown Before 1st TP</p>
+                <p className="mt-2 text-2xl font-semibold text-danger">
+                  {stats.drawdown_before_take_profit_percent != null
+                    ? `${stats.drawdown_before_take_profit_percent.toFixed(1)}%`
+                    : "Pending"}
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Lowest before TP: {formatCurrency(stats.drawdown_before_take_profit_price)}
+                </p>
+              </div>
             </div>
           ) : (
             <p className="text-muted-foreground">No price stats available yet. Trade may need more tracking time.</p>
           )}
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="border-b border-border px-4 py-4 sm:px-6">
+          <h2 className="text-lg font-semibold text-foreground">Take-Profit Tracking</h2>
+        </div>
+        <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 sm:p-6 xl:grid-cols-3">
+          <div className="rounded-lg border border-border bg-muted/20 p-6">
+            <p className="text-sm font-medium text-muted-foreground">Targets From Sheet</p>
+            <p className="mt-2 text-lg font-semibold text-foreground">
+              {formatTakeProfitTargets(data?.take_profit_targets ?? trade?.take_profit_targets)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/20 p-6">
+            <p className="text-sm font-medium text-muted-foreground">First TP Used For Analysis</p>
+            <p className="mt-2 text-lg font-semibold text-foreground">
+              {formatCurrency(stats?.take_profit_target_price)}
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              First profitable target above the alert price.
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/20 p-6">
+            <p className="text-sm font-medium text-muted-foreground">First TP Hit</p>
+            <p className="mt-2 text-lg font-semibold text-foreground">
+              {formatCurrency(stats?.take_profit_hit_price)}
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {stats?.take_profit_hit_at ? new Date(stats.take_profit_hit_at).toLocaleString() : "Not hit yet"}
+            </p>
+          </div>
         </div>
       </div>
     </div>

@@ -20,6 +20,7 @@ class Trade:
     analyst_name: str
     status: str  # ACTIVE | CLOSED
     tracking_start_time: dt.datetime
+    take_profit_targets: tuple[float, ...] = ()
 
 
 @dataclass

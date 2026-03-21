@@ -11,6 +11,11 @@ const STATUS_BADGES: Record<SheetTradeVerbose["status"], string> = {
   futures: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
 };
 
+function formatTakeProfitTargets(targets: number[] | undefined) {
+  if (!targets?.length) return "No TPs in sheet";
+  return targets.map((target, i) => `TP${i + 1}: $${target.toFixed(2)}`).join(" · ");
+}
+
 function SkeletonCard() {
   return (
     <div className="rounded-xl border border-border bg-card p-8 animate-pulse">
@@ -135,6 +140,10 @@ export default function SheetReference() {
                     </div>
                     <div className="mt-3 grid grid-cols-1 gap-3 text-sm">
                       <div className="rounded-lg bg-muted/30 p-3">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Take profits</p>
+                        <p className="mt-1 text-foreground">{formatTakeProfitTargets(t.take_profit_targets)}</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/30 p-3">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Expiry</p>
                         <p className="mt-1 text-foreground">{t.expiry_date ?? "—"}</p>
                       </div>
@@ -155,6 +164,9 @@ export default function SheetReference() {
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Entry
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Take Profits
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Expiry
@@ -178,6 +190,9 @@ export default function SheetReference() {
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {t.entry_price != null ? `$${t.entry_price.toFixed(2)}` : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {formatTakeProfitTargets(t.take_profit_targets)}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {t.expiry_date ?? "—"}
