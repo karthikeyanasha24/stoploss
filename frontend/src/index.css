@@ -66,3 +66,16 @@ body {
 .overflow-x-auto::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Print / Save as PDF: hide chrome, use landscape-friendly page, fit wide tables */
+@media print {
+  @page {
+    size: landscape;
+    margin: 8mm;
+  }
+  body {
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchAnalysis } from "../lib/api";
 import type { Analysis as AnalysisType } from "../lib/api";
+import { downloadAnalysisExcel } from "../lib/exportExcel";
 
 function SkeletonCard() {
   return (
@@ -46,13 +47,32 @@ export default function Analysis() {
     ? Math.max(...data.stop_results.map((r) => r.trades_stopped_out_pct))
     : 100;
 
+  function handleExportAnalysis() {
+    if (!data) return;
+    downloadAnalysisExcel(data);
+  }
+
   return (
     <div className="space-y-6 sm:space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Stop-Loss Analysis</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Drawdown on the path to TP1: (min price before TP1 − entry) / entry (negative % = underwater). TP1 is the first exit above entry in sheet order. Add column &quot;Lowest Price Before TP1&quot; for historical trades without full price logs.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Stop-Loss Analysis</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Drawdown on the path to TP1: (min price before TP1 − entry) / entry (negative % = underwater). TP1 is the first exit above entry in sheet order. Add column &quot;Lowest Price Before TP1&quot; for historical trades without full price logs.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleExportAnalysis}
+          disabled={loading || !data}
+          className="inline-flex w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50 disabled:opacity-50"
+          title="Downloads an Excel workbook: Summary, Stop levels, and Trades in sample (full tables — no scrolling)."
+        >
+          <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Export to Excel
+        </button>
       </div>
 
       {error && (

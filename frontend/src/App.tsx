@@ -6,6 +6,7 @@ import TradeDetails from "./pages/TradeDetails";
 import Analysis from "./pages/Analysis";
 import SheetReference from "./pages/SheetReference";
 import Logs from "./pages/Logs";
+import ClientGuide from "./pages/ClientGuide";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/analysis" element={<Analysis />} />
           <Route path="/sheet-reference" element={<SheetReference />} />
           <Route path="/logs" element={<Logs />} />
+          <Route path="/guide" element={<ClientGuide />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

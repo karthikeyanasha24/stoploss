@@ -7,6 +7,7 @@ const navLinks = [
   { to: "/analysis", label: "Analysis", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   { to: "/sheet-reference", label: "Sheet Reference", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { to: "/logs", label: "Logs", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
+  { to: "/guide", label: "Guide", icon: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" },
 ] as const;
 
 export default function Layout() {
@@ -33,7 +34,7 @@ export default function Layout() {
     <div className="min-h-screen bg-background text-foreground transition-colors duration-200">
 
       {/* ── Mobile top bar (hidden on lg+) ── */}
-      <header className="lg:hidden sticky top-0 z-30 flex items-center justify-between px-4 py-3 border-b border-border bg-card/90 backdrop-blur-sm">
+      <header className="lg:hidden print:hidden sticky top-0 z-30 flex items-center justify-between px-4 py-3 border-b border-border bg-card/90 backdrop-blur-sm">
         <Link to="/" className="text-base font-semibold text-foreground hover:text-accent transition-colors">
           Stop-Loss
         </Link>
@@ -94,7 +95,7 @@ export default function Layout() {
         <aside
           className={[
             // Shared
-            "w-[85vw] max-w-72 border-r border-border bg-card flex flex-col",
+            "w-[85vw] max-w-72 border-r border-border bg-card flex flex-col print:hidden",
             // Mobile: fixed full-height drawer
             "fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-in-out",
             sidebarOpen ? "translate-x-0" : "-translate-x-full",
@@ -170,8 +171,8 @@ export default function Layout() {
         </aside>
 
         {/* ── Main content ── */}
-        <main className="flex-1 min-w-0">
-          <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
+        <main className="flex-1 min-w-0 print:w-full">
+          <div className="mx-auto w-full max-w-[min(100%,100rem)] px-4 py-5 sm:px-6 sm:py-8 lg:px-8 print:max-w-none print:px-3 print:py-4">
             <Outlet />
           </div>
         </main>

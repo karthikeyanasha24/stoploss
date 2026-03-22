@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { fetchTrades, fetchAnalysis, syncSheetToDb } from "../lib/api";
 import type { Trade } from "../lib/api";
+import { downloadTradesExcel } from "../lib/exportExcel";
 
 type SortKey =
   | "entry_time"
@@ -152,7 +153,7 @@ function SkeletonRow({ columnCount }: { columnCount: number }) {
   return (
     <tr className="border-b border-border">
       {Array.from({ length: columnCount }).map((_, i) => (
-        <td key={i} className="px-4 py-3">
+        <td key={i} className="px-2 py-2 sm:px-3 sm:py-2.5">
           <div className="h-4 rounded bg-muted animate-pulse" />
         </td>
       ))}
@@ -328,13 +329,13 @@ function renderTradeTableCell(
   switch (colKey) {
     case "entry_time":
       return (
-        <td key={colKey} className="px-4 py-3 text-muted-foreground">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5 text-muted-foreground">
           {formatEntryDate(t.entry_time)}
         </td>
       );
     case "ticker":
       return (
-        <td key={colKey} className="px-4 py-3 font-medium">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5 font-medium">
           <Link to={`/trade/${t.id}`} className="text-accent hover:underline">
             {t.ticker}
           </Link>
@@ -342,13 +343,13 @@ function renderTradeTableCell(
       );
     case "strike_price":
       return (
-        <td key={colKey} className="px-4 py-3 text-foreground">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5 text-foreground">
           {t.strike_price}
         </td>
       );
     case "option_type":
       return (
-        <td key={colKey} className="px-4 py-3">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5">
           <span
             className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
               t.option_type === "CALL"
@@ -362,20 +363,20 @@ function renderTradeTableCell(
       );
     case "expiry_date":
       return (
-        <td key={colKey} className="px-4 py-3 text-muted-foreground">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5 text-muted-foreground">
           {t.expiry_date}
         </td>
       );
     case "entry_price":
       return (
-        <td key={colKey} className="px-4 py-3 text-foreground">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5 text-foreground">
           {formatCurrency(t.entry_price)}
         </td>
       );
     case "take_profit_target_price":
       return (
-        <td key={colKey} className="px-4 py-3 text-muted-foreground align-top">
-          <div className="max-w-[17rem]">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5 text-muted-foreground align-top">
+          <div className="min-w-0 max-w-[14rem] sm:max-w-[min(100%,18rem)] break-words">
             <div>{formatTakeProfitTargets(t.take_profit_targets, t.take_profit_targets_order)}</div>
             <PerTpBabjiDetail trade={t} />
           </div>
@@ -385,7 +386,7 @@ function renderTradeTableCell(
       return (
         <td
           key={colKey}
-          className="px-4 py-3"
+          className="px-2 py-2 sm:px-3 sm:py-2.5"
           title={
             t.current_price_source === "last"
               ? "Last price (not live) — compare with your broker"
@@ -405,7 +406,7 @@ function renderTradeTableCell(
       );
     case "drawdown_price":
       return (
-        <td key={colKey} className="px-4 py-3">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5">
           {t.drawdown_before_take_profit_price != null ? (
             <span className="font-medium text-danger">
               {formatCurrency(t.drawdown_before_take_profit_price)}
@@ -434,7 +435,7 @@ function renderTradeTableCell(
         .filter(Boolean)
         .join(" · ");
       return (
-        <td key={colKey} className="px-4 py-3" title={ddTooltip || undefined}>
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5" title={ddTooltip || undefined}>
           {t.drawdown_before_take_profit_percent != null ? (
             <span className="font-medium text-danger">
               {t.drawdown_before_take_profit_percent.toFixed(1)}%
@@ -456,7 +457,7 @@ function renderTradeTableCell(
     }
     case "babji_drawdown_percent":
       return (
-        <td key={colKey} className="px-4 py-3">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5">
           {!isBabjiApplicable(t) ? (
             <span className="text-muted-foreground text-xs" title="No TP1 from Take Profits — Babji not applicable">
               N/A
@@ -482,7 +483,7 @@ function renderTradeTableCell(
       return (
         <td
           key={colKey}
-          className="px-4 py-3 text-foreground"
+          className="px-2 py-2 sm:px-3 sm:py-2.5 text-foreground"
           title={
             !isBabjiApplicable(t)
               ? "Babji low only when TP1 exists (Take Profits)"
@@ -513,13 +514,13 @@ function renderTradeTableCell(
       return (
         <td
           key={colKey}
-          className="px-4 py-3 align-top text-muted-foreground text-xs"
+          className="px-2 py-2 sm:px-3 sm:py-2.5 align-top text-muted-foreground text-xs"
           title="TP1 hit = first time price reached TP1. Low = when the Babji low premium occurred (from logs or tracker)."
         >
           {!isBabjiApplicable(t) ? (
             <span className="text-muted-foreground">N/A</span>
           ) : (
-            <div className="max-w-[11rem] space-y-1">
+            <div className="min-w-0 max-w-[9rem] sm:max-w-[11rem] space-y-1 break-words">
               <div className="font-medium text-foreground">{formatBabjiSource(babjiSrc)}</div>
               <div className="space-y-0.5 text-[10px] leading-snug">
                 <div>
@@ -537,13 +538,13 @@ function renderTradeTableCell(
       );
     case "analyst_name":
       return (
-        <td key={colKey} className="px-4 py-3 text-muted-foreground">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5 text-muted-foreground">
           {t.analyst_name || "—"}
         </td>
       );
     case "status":
       return (
-        <td key={colKey} className="px-4 py-3">
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5">
           <span className="text-sm text-muted-foreground capitalize">{t.status || "—"}</span>
         </td>
       );
@@ -718,6 +719,20 @@ export default function Dashboard() {
     }
   };
 
+  function handleExportExcel(mode: "filtered" | "all") {
+    const list = mode === "filtered" ? sortedTrades : trades;
+    if (!list.length) {
+      window.alert(
+        mode === "filtered"
+          ? "No trades match the current filter — change filters or use “Export all trades”."
+          : "No trades loaded — sync from the sheet first.",
+      );
+      return;
+    }
+    const suffix = mode === "filtered" ? "dashboard-filtered" : "dashboard-all-trades";
+    downloadTradesExcel(list, suffix);
+  }
+
   const tradesTracked = trades.filter((t) => t.status?.toLowerCase() === "tracking" || t.status === "active").length || trades.length;
 
   return (
@@ -729,6 +744,41 @@ export default function Dashboard() {
             Monitor tracked trades and performance
           </p>
         </div>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:flex-wrap">
+        <div className="flex w-full flex-col gap-1 sm:w-auto">
+          <button
+            type="button"
+            onClick={() => handleExportExcel("filtered")}
+            disabled={loading}
+            className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50 disabled:opacity-50"
+            title="Downloads an Excel file with every column and every row matching your current filters and sort (not only the current page). No horizontal scrolling needed."
+          >
+            <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Export to Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportExcel("all")}
+            disabled={loading || trades.length === 0}
+            className="inline-flex w-full sm:w-auto items-center justify-center rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 disabled:opacity-50"
+            title="Same full columns, but every trade in the app (ignores date filters)."
+          >
+            Export all trades (ignore filters)
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50 print:hidden"
+          title="Opens your browser’s print dialog — choose Save as PDF to capture the full page. For very wide tables, pick Landscape in the print dialog."
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+          </svg>
+          Print / Save PDF
+        </button>
         <button
           type="button"
           onClick={handleSyncFromSheet}
@@ -746,6 +796,7 @@ export default function Dashboard() {
             </>
           )}
         </button>
+        </div>
       </div>
       {trades.length === 0 && !loading && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
@@ -791,8 +842,11 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Active Trades Table */}
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      {/* Active Trades Table — id for print; wide layout + compact cells reduce horizontal scroll */}
+      <div
+        id="dashboard-active-trades"
+        className="overflow-hidden rounded-xl border border-border bg-card shadow-sm print:shadow-none print:border-border"
+      >
         <div className="px-4 sm:px-6 py-4 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Active Trades</h2>
@@ -965,7 +1019,7 @@ export default function Dashboard() {
         </div>
 
         {error && (
-          <div className="mx-6 mt-4 rounded-lg bg-danger/10 border border-danger/20 px-4 py-3 text-danger text-sm">
+          <div className="mx-6 mt-4 rounded-lg bg-danger/10 border border-danger/20 px-2 py-2 sm:px-3 sm:py-2.5 text-danger text-sm">
             {error}
           </div>
         )}
@@ -992,14 +1046,14 @@ export default function Dashboard() {
               ))}
         </div>
 
-        <div className="hidden overflow-x-auto sm:block">
-          <table className="w-full min-w-[700px]">
+        <div className="hidden w-full min-w-0 overflow-x-auto sm:block print:overflow-visible">
+          <table className="w-full min-w-0 table-auto text-xs print:text-[11px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 {visibleTableColumns.map((col) => (
                   <th
                     key={col.key}
-                    className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground transition-colors"
+                    className="px-2 py-2 sm:px-3 sm:py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground transition-colors"
                     onClick={() => handleSort(col.key)}
                   >
                     <span className="inline-flex items-center gap-1">
@@ -1042,7 +1096,7 @@ export default function Dashboard() {
         </div>
 
         {!loading && totalPages > 1 && (
-          <div className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex flex-col gap-3 border-t border-border px-2 py-2 sm:px-3 sm:py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <p className="text-sm text-muted-foreground">
               Page {page + 1} of {totalPages}
             </p>
