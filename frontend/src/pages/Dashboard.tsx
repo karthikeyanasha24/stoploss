@@ -35,7 +35,7 @@ const TABLE_COLUMNS: { key: SortKey; label: string; group: "base" | "current" | 
   { key: "take_profit_target_price", label: "Take Profits", group: "base" },
   { key: "current_price", label: "Current Price", group: "current" },
   { key: "drawdown_price", label: "Drawdown", group: "current" },
-  { key: "max_drawdown_percent", label: "Current DD %", group: "current" },
+  { key: "max_drawdown_percent", label: "Max DD %", group: "current" },
   { key: "babji_drawdown_percent", label: "Babji DD %", group: "babji" },
   { key: "babji_low_price", label: "Babji Low", group: "babji" },
   { key: "babji_drawdown_source", label: "Source", group: "babji" },
@@ -171,9 +171,6 @@ function MobileTradeCard({
   showBabjiCols: boolean;
 }) {
   const hasDrawdownData = trade.drawdown_price != null;
-  const takeProfitDrawdownPrice = trade.drawdown_before_take_profit_price;
-  const takeProfitDrawdownPercent = trade.drawdown_before_take_profit_percent;
-  const drawdownLabel = takeProfitDrawdownPercent != null ? "DD to 1st TP" : "Live drawdown";
   const babjiPct = trade.babji_drawdown_percent;
   const babjiLabel = "Babji DD %";
 
@@ -239,24 +236,24 @@ function MobileTradeCard({
               </p>
             </div>
             <div className="rounded-lg bg-muted/30 p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">{drawdownLabel}</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">All-time Low</p>
               <p className="mt-1 font-medium text-danger">
-                {takeProfitDrawdownPrice != null
-                  ? formatCurrency(takeProfitDrawdownPrice)
-                  : hasDrawdownData
-                    ? formatCurrency(trade.drawdown_price)
-                    : "No data"}
+                {hasDrawdownData ? formatCurrency(trade.drawdown_price) : "No data"}
               </p>
+              {trade.drawdown_before_take_profit_price != null && trade.drawdown_before_take_profit_price !== trade.drawdown_price ? (
+                <p className="mt-0.5 text-[10px] text-muted-foreground">pre-TP: {formatCurrency(trade.drawdown_before_take_profit_price)}</p>
+              ) : null}
             </div>
             <div className="rounded-lg bg-muted/30 p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">{drawdownLabel} %</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Max DD %</p>
               <p className="mt-1 font-medium text-danger">
-                {takeProfitDrawdownPercent != null
-                  ? `${takeProfitDrawdownPercent.toFixed(1)}%`
-                  : trade.max_drawdown_percent != null
-                    ? `${trade.max_drawdown_percent.toFixed(1)}%`
-                    : "No data"}
+                {trade.max_drawdown_percent != null
+                  ? `${trade.max_drawdown_percent.toFixed(1)}%`
+                  : "No data"}
               </p>
+              {trade.drawdown_before_take_profit_percent != null ? (
+                <p className="mt-0.5 text-[10px] text-muted-foreground">pre-TP: {trade.drawdown_before_take_profit_percent.toFixed(1)}%</p>
+              ) : null}
             </div>
           </>
         ) : null}
@@ -406,13 +403,17 @@ function renderTradeTableCell(
       );
     case "drawdown_price":
       return (
-        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5">
-          {t.drawdown_before_take_profit_price != null ? (
+        <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5" title="All-time lowest premium seen since entry (regardless of TP)">
+          {hasDrawdownData ? (
             <span className="font-medium text-danger">
-              {formatCurrency(t.drawdown_before_take_profit_price)}
+              {formatCurrency(dd)}
+              {/* Secondary: pre-TP1 low when it differs from all-time low */}
+              {t.drawdown_before_take_profit_price != null && t.drawdown_before_take_profit_price !== dd ? (
+                <span className="block text-xs font-normal text-muted-foreground">
+                  pre-TP: {formatCurrency(t.drawdown_before_take_profit_price)}
+                </span>
+              ) : null}
             </span>
-          ) : hasDrawdownData ? (
-            <span className="font-medium text-danger">{formatCurrency(dd)}</span>
           ) : (
             <span
               className="text-amber-600 dark:text-amber-400 text-xs font-medium"
@@ -424,30 +425,29 @@ function renderTradeTableCell(
         </td>
       );
     case "max_drawdown_percent": {
+      // Always show overall max drawdown (entry → all-time lowest), regardless of TP
       const ddTooltip = [
-        t.drawdown_before_tp1_percent_signed != null
-          ? `MAE ${t.drawdown_before_take_profit_percent?.toFixed(1)}% · signed (min−entry)/entry: ${t.drawdown_before_tp1_percent_signed.toFixed(1)}%`
+        `Overall max DD: (entry − all-time low) / entry × 100`,
+        t.drawdown_before_take_profit_percent != null
+          ? `Pre-TP1 MAE: ${t.drawdown_before_take_profit_percent.toFixed(1)}% (Babji window only)`
           : null,
         t.lowest_price_at
-          ? `Global running low last seen: ${formatIsoDateShort(t.lowest_price_at)}`
+          ? `All-time low last seen: ${formatIsoDateShort(t.lowest_price_at)}`
           : null,
       ]
         .filter(Boolean)
         .join(" · ");
       return (
         <td key={colKey} className="px-2 py-2 sm:px-3 sm:py-2.5" title={ddTooltip || undefined}>
-          {t.drawdown_before_take_profit_percent != null ? (
-            <span className="font-medium text-danger">
-              {t.drawdown_before_take_profit_percent.toFixed(1)}%
-              {t.drawdown_before_tp1_percent_signed != null ? (
-                <span className="block text-xs font-normal text-muted-foreground">
-                  signed {t.drawdown_before_tp1_percent_signed.toFixed(1)}%
-                </span>
-              ) : null}
-            </span>
-          ) : t.max_drawdown_percent != null ? (
+          {t.max_drawdown_percent != null ? (
             <span className={t.max_drawdown_percent > 0 ? "font-medium text-danger" : "text-muted-foreground"}>
               {t.max_drawdown_percent.toFixed(1)}%
+              {/* Secondary: pre-TP1 drawdown when TP was hit (Babji window) */}
+              {t.drawdown_before_take_profit_percent != null ? (
+                <span className="block text-xs font-normal text-muted-foreground">
+                  pre-TP: {t.drawdown_before_take_profit_percent.toFixed(1)}%
+                </span>
+              ) : null}
             </span>
           ) : (
             <span className="text-amber-600 dark:text-amber-400 text-xs font-medium">No data</span>
@@ -859,7 +859,7 @@ export default function Dashboard() {
                   {" "}
                   —{" "}
                   <span className="text-amber-600 dark:text-amber-400">
-                    Babji DD applies only when Take Profits define TP1 — no TP column means N/A (use Current DD %). When TP exists: Live (before TP1), Frozen/Limited (after TP1). Current DD %: global low since tracking. Amber: no price yet.
+                    Max DD %: overall lowest premium since tracking (entry → all-time low, regardless of TP). Babji DD: drawdown before TP1 only (N/A when no TP defined). When TP exists: Live (before TP1 hit), Frozen/Limited (after TP1). Amber rows: no price data yet.
                   </span>
                 </>
               )}
