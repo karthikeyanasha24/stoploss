@@ -33,9 +33,9 @@ const TABLE_COLUMNS: { key: SortKey; label: string; group: "base" | "current" | 
   { key: "expiry_date", label: "Expiry", group: "base" },
   { key: "entry_price", label: "Entry", group: "base" },
   { key: "take_profit_target_price", label: "Take Profits", group: "base" },
+  { key: "max_drawdown_percent", label: "Max DD % (any TP)", group: "base" },
   { key: "current_price", label: "Current Price", group: "current" },
-  { key: "drawdown_price", label: "Drawdown", group: "current" },
-  { key: "max_drawdown_percent", label: "Max DD %", group: "current" },
+  { key: "drawdown_price", label: "All-time Low", group: "current" },
   { key: "babji_drawdown_percent", label: "Babji DD %", group: "babji" },
   { key: "babji_low_price", label: "Babji Low", group: "babji" },
   { key: "babji_drawdown_source", label: "Source", group: "babji" },
@@ -225,6 +225,18 @@ function MobileTradeCard({
           </p>
           <PerTpBabjiDetail trade={trade} />
         </div>
+        {/* Max DD % — always visible regardless of TP or column view */}
+        <div className="rounded-lg bg-danger/5 border border-danger/20 p-3 col-span-2">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Max DD % <span className="normal-case text-[10px]">(any TP)</span></p>
+          <p className="mt-1 font-semibold text-danger">
+            {trade.max_drawdown_percent != null
+              ? `${trade.max_drawdown_percent.toFixed(1)}%`
+              : "No data"}
+          </p>
+          {trade.drawdown_before_take_profit_percent != null ? (
+            <p className="mt-0.5 text-[10px] text-muted-foreground">pre-TP only: {trade.drawdown_before_take_profit_percent.toFixed(1)}%</p>
+          ) : null}
+        </div>
         {showCurrentCols ? (
           <>
             <div className="rounded-lg bg-muted/30 p-3">
@@ -242,17 +254,6 @@ function MobileTradeCard({
               </p>
               {trade.drawdown_before_take_profit_price != null && trade.drawdown_before_take_profit_price !== trade.drawdown_price ? (
                 <p className="mt-0.5 text-[10px] text-muted-foreground">pre-TP: {formatCurrency(trade.drawdown_before_take_profit_price)}</p>
-              ) : null}
-            </div>
-            <div className="rounded-lg bg-muted/30 p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Max DD %</p>
-              <p className="mt-1 font-medium text-danger">
-                {trade.max_drawdown_percent != null
-                  ? `${trade.max_drawdown_percent.toFixed(1)}%`
-                  : "No data"}
-              </p>
-              {trade.drawdown_before_take_profit_percent != null ? (
-                <p className="mt-0.5 text-[10px] text-muted-foreground">pre-TP: {trade.drawdown_before_take_profit_percent.toFixed(1)}%</p>
               ) : null}
             </div>
           </>
@@ -427,7 +428,7 @@ function renderTradeTableCell(
     case "max_drawdown_percent": {
       // Always show overall max drawdown (entry → all-time lowest), regardless of TP
       const ddTooltip = [
-        `Overall max DD: (entry − all-time low) / entry × 100`,
+        `Max drawdown regardless of TP: (entry − all-time low) / entry × 100`,
         t.drawdown_before_take_profit_percent != null
           ? `Pre-TP1 MAE: ${t.drawdown_before_take_profit_percent.toFixed(1)}% (Babji window only)`
           : null,
@@ -859,7 +860,7 @@ export default function Dashboard() {
                   {" "}
                   —{" "}
                   <span className="text-amber-600 dark:text-amber-400">
-                    Max DD %: overall lowest premium since tracking (entry → all-time low, regardless of TP). Babji DD: drawdown before TP1 only (N/A when no TP defined). When TP exists: Live (before TP1 hit), Frozen/Limited (after TP1). Amber rows: no price data yet.
+                    Max DD % (any TP): overall lowest premium seen since entry, regardless of take profits. Babji DD: drawdown before TP1 only (N/A when no TP defined). When TP exists: Live (before TP1 hit), Frozen/Limited (after TP1). Amber rows: no price data yet.
                   </span>
                 </>
               )}
