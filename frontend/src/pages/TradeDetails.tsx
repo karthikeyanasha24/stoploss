@@ -187,15 +187,18 @@ export default function TradeDetails() {
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-6">
-                <p className="text-sm font-medium text-muted-foreground">Max Drawdown Since Entry</p>
+                <p className="text-sm font-medium text-muted-foreground">Max Drawdown Since Entry (Full Trade)</p>
                 <p className={`mt-2 text-2xl font-semibold ${stats.max_drawdown_percent >= 0 ? "text-danger" : "text-success"}`}>
                   {stats.max_drawdown_percent >= 0
                     ? `${stats.max_drawdown_percent.toFixed(1)}%`
                     : `${stats.max_drawdown_percent.toFixed(1)}%`}
                 </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Uses the lowest price seen at any time after entry.
+                </p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-6">
-                <p className="text-sm font-medium text-muted-foreground">Drawdown Before 1st TP</p>
+                <p className="text-sm font-medium text-muted-foreground">Drawdown Before 1st TP (Pre-TP Path)</p>
                 <p className="mt-2 text-2xl font-semibold text-danger">
                   {stats.drawdown_before_take_profit_percent != null
                     ? `${stats.drawdown_before_take_profit_percent.toFixed(1)}%`

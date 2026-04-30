@@ -97,6 +97,11 @@ export default function Analysis() {
               {data.summary && (
                 <p className="mt-3 text-muted-foreground max-w-xl">{data.summary}</p>
               )}
+              {data.recommendation_target_stop_out_pct != null && (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Method: choose the stop level whose simulated stop-out rate is closest to {data.recommendation_target_stop_out_pct}% (balanced risk vs survival).
+                </p>
+              )}
               {data.total_trades_analyzed != null && (
                 <p className="mt-2 text-sm text-muted-foreground">
                   Based on {data.total_trades_analyzed} trade{data.total_trades_analyzed === 1 ? "" : "s"} that hit a take-profit target after ≥{data.analysis_days ?? 7} days of tracking

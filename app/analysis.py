@@ -102,12 +102,19 @@ def run_analysis() -> dict:
         rate = (hit_counts[s] / denom * 100) if denom else 0
         stop_results.append({"stop_percent": s, "trades_stopped_out_pct": round(rate, 1), "trades_stopped": hit_counts[s], "total_trades": denom})
 
-    # Recommend: e.g. 30% as balanced (middle of range); or lowest stop with < 50% hit rate
+    # Recommend a balanced stop: closest to a target stop-out rate (default 35%).
+    # This avoids "first level under 50%" selecting 15% too aggressively.
+    target_hit_rate = config.ANALYSIS_TARGET_STOP_OUT_PCT
     recommended = 30
-    for s in stops:
-        if denom and (hit_counts[s] / denom) < 0.5:
-            recommended = s
-            break
+    if denom and stop_results:
+        recommended_row = min(
+            stop_results,
+            key=lambda r: (
+                abs(r["trades_stopped_out_pct"] - target_hit_rate),
+                r["stop_percent"],  # tie-break toward tighter risk
+            ),
+        )
+        recommended = int(recommended_row["stop_percent"])
 
     def _percentile(vals: list[float], pct: float) -> Optional[float]:
         if not vals:
@@ -170,8 +177,13 @@ def run_analysis() -> dict:
             "note": "drawdown_percent_signed = (min_price_before_tp1 - entry) / entry * 100 (negative when underwater)",
             "outlier_note": f"Trades with signed drawdown <= {threshold}% are excluded from stop-% rates and from the excluding-outliers stats",
         },
+        "recommendation_method": (
+            f"closest_stop_to_target_hit_rate_{target_hit_rate:.1f}pct"
+        ),
+        "recommendation_target_stop_out_pct": round(target_hit_rate, 1),
         "summary": (
-            f"Recommended Stop: {recommended}% (based on {denom} trade(s) after excluding signed drawdown <= {threshold}%). "
+            f"Recommended Stop: {recommended}% (closest to target stop-out {target_hit_rate:.1f}%, "
+            f"based on {denom} trade(s) after excluding signed drawdown <= {threshold}%). "
             "Uses lowest premium on the path to TP1 (manual sheet column or price logs), not current price. "
             "Stop simulation uses the positive drawdown magnitude vs your stop %."
         ),

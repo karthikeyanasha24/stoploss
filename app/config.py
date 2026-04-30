@@ -159,6 +159,8 @@ ANALYSIS_DAYS: int = _get_int("ANALYSIS_DAYS", 7)
 STOP_PERCENTAGES: list = [15, 20, 25, 30, 35, 40]
 # Exclude trades with signed drawdown before TP1 <= this % from stop-% stats (lotto / extreme MAE)
 ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW: float = _get_float("ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW", -70.0)
+# Balanced recommendation target: pick stop with hit-rate closest to this %.
+ANALYSIS_TARGET_STOP_OUT_PCT: float = _get_float("ANALYSIS_TARGET_STOP_OUT_PCT", 35.0)
 
 MOCK_API: bool = _get_bool("MOCK_API", False)
 PAPER_TRADING: bool = _get_bool("PAPER_TRADING", True)  # Tradier: sandbox vs live
@@ -175,7 +177,7 @@ def reload_config() -> None:
     """Re-read settings from store and update module-level config. Call after saving settings."""
     global API_PROVIDER, API_KEY, API_BASE_URL, GOOGLE_CREDENTIALS_PATH, GOOGLE_CREDENTIALS_FROM_ENV, SPREADSHEET_ID
     global POLLING_INTERVAL, MARKET_TIMEZONE, MARKET_OPEN, MARKET_CLOSE
-    global ANALYSIS_DAYS, ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW, MOCK_API, PAPER_TRADING, SHEET_PARSE_DEBUG
+    global ANALYSIS_DAYS, ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW, ANALYSIS_TARGET_STOP_OUT_PCT, MOCK_API, PAPER_TRADING, SHEET_PARSE_DEBUG
     _api_prov = _api_provider()
     _key_raw = (
         _get("API_KEY")
@@ -196,6 +198,7 @@ def reload_config() -> None:
     MARKET_CLOSE = _get("MARKET_CLOSE", "16:00")
     ANALYSIS_DAYS = _get_int("ANALYSIS_DAYS", 7)
     ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW = _get_float("ANALYSIS_EXCLUDE_SIGNED_DRAWDOWN_BELOW", -70.0)
+    ANALYSIS_TARGET_STOP_OUT_PCT = _get_float("ANALYSIS_TARGET_STOP_OUT_PCT", 35.0)
     MOCK_API = _get_bool("MOCK_API", False)
     PAPER_TRADING = _get_bool("PAPER_TRADING", True)
     SHEET_PARSE_DEBUG = _get_bool("SHEET_PARSE_DEBUG", False)

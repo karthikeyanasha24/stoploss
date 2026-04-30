@@ -118,6 +118,8 @@ export type Analysis = {
   total_trades_for_stop_simulation?: number;
   stop_results: StopResult[];
   recommended_stop: number | null;
+  recommendation_method?: string;
+  recommendation_target_stop_out_pct?: number;
   summary?: string;
   message?: string;
   trades_detail?: AnalysisTradeDetail[];
